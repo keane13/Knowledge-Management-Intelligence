@@ -1,0 +1,55 @@
+ragas
+datasets
+weaviate-client
+langchain-weaviate
+langchain-openai
+langchain-community
+langchain-groq
+groq
+python-dotenv
+pandas
+streamlit
+fastapi
+uvicorn
+python-multipart
+docling
+langchain-docling
+sqlalchemy
+psycopg2-binary
+sentence-transformers
+
+# Arize Phoenix – observability & tracing
+arize-phoenix>=4.0
+arize-phoenix-otel
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
+openinference-instrumentation-groq
+openinference-instrumentation-langchain
+
+# NeMo Guardrails – input/output safety
+nemoguardrails>=0.9
+
+# Evaluation
+bert-score>=0.3.13
+
+# Word & Image document support
+python-docx
+pytesseract
+Pillow
+passlib[bcrypt]
+openpyxl
+
+# Llama Index for Semantic Chunking
+llama-index-core
+llama-index-embeddings-openai
+llama-index-embeddings-huggingface
+langchain-huggingface
+pymupdf
+liteparse
+
+# GraphRAG — Deep Analytic Mode
+networkx>=3.3
+
+# Google Cloud
+google-cloud-storage
+google-cloud-bigquery

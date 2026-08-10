@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Policy PMK AI",
+  title: "Knowledge Management Intelligence",
   description: "Advanced RAG System",
   icons: {
     icon: "/favicon.ico", // Ensure this exists or falls back
@@ -21,8 +21,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body className={cn(inter.className, "antialiased min-h-screen bg-background")}>
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body className={cn(inter.className, "antialiased min-h-screen bg-background")} suppressHydrationWarning>
         {children}
       </body>
     </html>

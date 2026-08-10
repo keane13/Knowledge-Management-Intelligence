@@ -1,15 +1,31 @@
+export interface ThinkingStep {
+    step: string;
+    content: string;
+}
+
+export interface CitationSource {
+    filename: string;
+    full_path?: string;
+    content?: string;
+}
+
 export interface Message {
     role: 'user' | 'assistant';
     content: string;
     imagePreview?: string;
     isThinking?: boolean;
     isComplete?: boolean;
+    mode?: string;
+    thinkingSteps?: ThinkingStep[];
+    thinkingOpen?: boolean;
     metrics?: {
         latency: number;
         faithfulness?: number;
         answer_relevancy?: number;
     };
-    sources?: { filename: string; content: string }[];
+    sources?: CitationSource[];
+    chartType?: string;
+    chartData?: any[];
 }
 
 export interface Session {
@@ -21,6 +37,8 @@ export interface Session {
 export interface FileItem {
     filename: string;
     checked?: boolean;
+    size?: number;
+    updated?: string;
 }
 
 export interface RetrievalContext {

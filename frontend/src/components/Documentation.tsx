@@ -10,9 +10,9 @@ import { motion } from "framer-motion";
 
 export default function Documentation() {
     return (
-        <div className="flex-1 flex flex-col h-full bg-slate-50 overflow-y-auto light-scrollbar">
+        <div className="flex-1 flex flex-col h-full overflow-y-auto light-scrollbar">
             {/* Header */}
-            <div className="bg-white border-b border-slate-200 px-8 py-10">
+            <div className="px-8 py-10">
                 <div className="max-w-4xl mx-auto">
                     <div className="flex items-center gap-3 mb-4">
                         <div className="p-2 rounded-lg bg-blue-100 text-blue-600">
@@ -63,7 +63,7 @@ export default function Documentation() {
                         </div>
                         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
                             <h3 className="text-md font-bold text-slate-800 mb-3 flex items-center gap-2">
-                                <div className="w-2 h-2 rounded-full bg-violet-500" />
+                                <div className="w-2 h-2 rounded-full bg-sky-500" />
                                 Deep Mode (Qwen 3 32B)
                             </h3>
                             <p className="text-sm text-slate-600 leading-relaxed">
@@ -76,28 +76,28 @@ export default function Documentation() {
                 {/* 3. Model Stack & Tech */}
                 <section>
                     <div className="flex items-center gap-2 mb-6">
-                        <Cpu className="w-5 h-5 text-indigo-500" />
+                        <Cpu className="w-5 h-5 text-blue-500" />
                         <h2 className="text-xl font-bold text-slate-800 uppercase tracking-wider text-sm">Intelligence Stack</h2>
                     </div>
-                    <div className="bg-indigo-950 rounded-2xl p-8 border border-white/10 shadow-xl overflow-hidden relative">
+                    <div className="bg-blue-950 rounded-2xl p-8 border border-white/10 shadow-xl overflow-hidden relative">
                         {/* Decorative background element */}
                         <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 blur-3xl rounded-full translate-x-1/2 -translate-y-1/2" />
 
                         <div className="space-y-8 relative z-10 text-slate-300">
                             <div className="flex gap-6 items-start">
-                                <div className="mt-1 p-2 rounded-lg bg-indigo-900 text-indigo-400">
+                                <div className="mt-1 p-2 rounded-lg bg-blue-900 text-blue-400">
                                     <Layers className="w-5 h-5" />
                                 </div>
                                 <div>
                                     <h4 className="text-white font-bold mb-1">Vector Database & Embeddings</h4>
                                     <p className="text-sm">
-                                        Menggunakan <span className="text-indigo-400 font-medium">Weaviate</span> sebagai mesin pencari vektor. Teks dikonversi menjadi representasi numerik menggunakan model <span className="text-indigo-400 font-medium">BGE-Base-ID</span> yang spesifik dioptimalkan untuk Bahasa Indonesia.
+                                        Menggunakan <span className="text-blue-400 font-medium">Weaviate</span> sebagai mesin pencari vektor. Teks dikonversi menjadi representasi numerik menggunakan model <span className="text-blue-400 font-medium">BGE-Base-ID</span> yang spesifik dioptimalkan untuk Bahasa Indonesia.
                                     </p>
                                 </div>
                             </div>
 
                             <div className="flex gap-6 items-start">
-                                <div className="mt-1 p-2 rounded-lg bg-indigo-900 text-cyan-400">
+                                <div className="mt-1 p-2 rounded-lg bg-blue-900 text-cyan-400">
                                     <Search className="w-5 h-5" />
                                 </div>
                                 <div>
@@ -109,7 +109,7 @@ export default function Documentation() {
                             </div>
 
                             <div className="flex gap-6 items-start">
-                                <div className="mt-1 p-2 rounded-lg bg-indigo-900 text-emerald-400">
+                                <div className="mt-1 p-2 rounded-lg bg-blue-900 text-emerald-400">
                                     <Server className="w-5 h-5" />
                                 </div>
                                 <div>

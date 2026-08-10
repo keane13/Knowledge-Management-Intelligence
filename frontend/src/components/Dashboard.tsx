@@ -12,6 +12,22 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+import {
+    BarChart,
+    Bar,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
+    ResponsiveContainer,
+    RadarChart,
+    PolarGrid,
+    PolarAngleAxis,
+    PolarRadiusAxis,
+    Radar,
+    Legend
+} from "recharts";
+
 interface DashboardMetrics {
     avg_retrieval_latency: number;
     avg_rerank_latency: number;
@@ -19,6 +35,13 @@ interface DashboardMetrics {
     avg_bert_score: number;
     total_documents: number;
     total_cost: number;
+    ragas_metrics?: {
+        faithfulness: number;
+        answer_relevancy: number;
+        context_precision: number;
+        context_recall: number;
+        semantic_accuracy: number;
+    };
 }
 
 export default function Dashboard() {
@@ -30,7 +53,8 @@ export default function Dashboard() {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch("http://localhost:8000/dashboard/metrics");
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            const res = await fetch(`${apiUrl}/dashboard/metrics`);
             if (!res.ok) throw new Error("Failed to fetch metrics");
             const data = await res.json();
             setMetrics(data);
@@ -47,7 +71,7 @@ export default function Dashboard() {
 
     const MetricCard = ({ title, value, unit, icon: Icon, description, trend }: any) => (
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-blue-50 to-indigo-50/50 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-blue-50 to-blue-50/50 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
 
             <div className="flex justify-between items-start mb-4 relative">
                 <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
@@ -71,7 +95,7 @@ export default function Dashboard() {
     );
 
     return (
-        <div className="flex-1 flex flex-col h-full bg-slate-50/50 overflow-y-auto w-full">
+        <div className="flex-1 flex flex-col h-full overflow-y-auto w-full">
             <div className="max-w-6xl mx-auto w-full p-8">
                 {/* Header */}
                 <div className="flex items-center justify-between mb-8">
@@ -148,6 +172,51 @@ export default function Dashboard() {
                                 description="Average LLM generation time (seconds)"
                             />
                         </div>
+
+                        {/* RAGAS Evaluation Chart */}
+                        <h2 className="text-lg font-semibold text-slate-800 mt-8 mb-4 flex items-center gap-2">
+                            <CheckCircle className="w-5 h-5 text-emerald-500" />
+                            RAGAS Quality Metrics Breakdown
+                        </h2>
+
+                        {metrics?.ragas_metrics && (
+                            <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                                <div className="h-[350px] w-full">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <RadarChart cx="50%" cy="50%" outerRadius="80%" data={[
+                                            { subject: 'Faithfulness', A: metrics.ragas_metrics.faithfulness, fullMark: 1 },
+                                            { subject: 'Relevancy', A: metrics.ragas_metrics.answer_relevancy, fullMark: 1 },
+                                            { subject: 'Context Precision', A: metrics.ragas_metrics.context_precision, fullMark: 1 },
+                                            { subject: 'Context Recall', A: metrics.ragas_metrics.context_recall, fullMark: 1 },
+                                            { subject: 'Semantic Accuracy', A: metrics.ragas_metrics.semantic_accuracy, fullMark: 1 },
+                                        ]}>
+                                            <PolarGrid stroke="#e2e8f0" />
+                                            <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 13 }} />
+                                            <PolarRadiusAxis angle={30} domain={[0, 1]} tick={{ fill: '#94a3b8' }} />
+                                            <Radar name="RAGAS Score" dataKey="A" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.4} />
+                                            <Tooltip 
+                                                formatter={(value: number) => [(value * 100).toFixed(1) + '%', 'Score']}
+                                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
+                                            />
+                                        </RadarChart>
+                                    </ResponsiveContainer>
+                                </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mt-6">
+                                    {[
+                                        { label: 'Faithfulness', value: metrics.ragas_metrics.faithfulness },
+                                        { label: 'Relevancy', value: metrics.ragas_metrics.answer_relevancy },
+                                        { label: 'Ctx Precision', value: metrics.ragas_metrics.context_precision },
+                                        { label: 'Ctx Recall', value: metrics.ragas_metrics.context_recall },
+                                        { label: 'Semantic Acc.', value: metrics.ragas_metrics.semantic_accuracy },
+                                    ].map((item, idx) => (
+                                        <div key={idx} className="text-center p-3 rounded-xl bg-slate-50 border border-slate-100">
+                                            <div className="text-xs text-slate-500 font-medium mb-1">{item.label}</div>
+                                            <div className="text-lg font-bold text-slate-800">{(item.value * 100).toFixed(1)}%</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

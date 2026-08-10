@@ -38,9 +38,14 @@ frontend/.env.production.local
 src/infrastructure/phoenix_data/
 data/docs/
 !data/hasil_eval.json
-
+data/
+Skill/
 # IDEs and OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Large files
+frontend/.next.zip
+backend/src/infrastructure/tools/toolbox.exe

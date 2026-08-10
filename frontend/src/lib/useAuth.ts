@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 export interface AuthUser {
     name: string;
     email: string;
+    token?: string;
 }
 
 const STORAGE_KEY = "rag_pro_user";
@@ -18,7 +19,7 @@ export function useAuth() {
             const stored = localStorage.getItem(STORAGE_KEY);
             if (stored) {
                 const parsed = JSON.parse(stored);
-                setUser({ name: parsed.name, email: parsed.email });
+                setUser({ name: parsed.name, email: parsed.email, token: parsed.token });
             }
         } catch {
             // ignore
@@ -30,7 +31,8 @@ export function useAuth() {
     const login = useCallback(
         async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
             try {
-                const res = await fetch("http://localhost:8000/login", {
+                const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const res = await fetch(`${apiUrl}/login`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ username: email, password })
@@ -41,7 +43,7 @@ export function useAuth() {
                     return { success: false, error: data.detail || "Login failed" };
                 }
 
-                const authUser: AuthUser = { name: data.username || email.split('@')[0], email };
+                const authUser: AuthUser = { name: data.username || email.split('@')[0], email, token: data.token };
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(authUser));
                 setUser(authUser);
                 return { success: true };
@@ -65,7 +67,8 @@ export function useAuth() {
                 };
             }
             try {
-                const res = await fetch("http://localhost:8000/register", {
+                const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const res = await fetch(`${apiUrl}/register`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ username: email, password })
@@ -76,7 +79,7 @@ export function useAuth() {
                     return { success: false, error: data.detail || "Registration failed" };
                 }
 
-                const authUser: AuthUser = { name, email };
+                const authUser: AuthUser = { name, email, token: data.token };
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(authUser));
                 setUser(authUser);
                 return { success: true };

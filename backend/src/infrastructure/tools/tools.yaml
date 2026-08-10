@@ -1,0 +1,140 @@
+sources:
+  finance-bq-source:
+    kind: bigquery
+    project: smooth-reason-491707-f6
+    location: us-central1
+
+  hr-bq-source:
+    kind: bigquery
+    project: smooth-reason-491707-f6
+    location: us-central1
+
+  legal-bq-source:
+    kind: bigquery
+    project: smooth-reason-491707-f6
+    location: us-central1
+
+  marketing-bq-source:
+    kind: bigquery
+    project: smooth-reason-491707-f6
+    location: us-central1
+
+tools:
+  # ===== FINANCE TOOLS =====
+  finance_list_tables:
+    kind: bigquery-list-table-ids
+    source: finance-bq-source
+    description: |
+      Lists all table IDs in the Finance dataset (knowledge_finance).
+      Tables: budgets, chart_of_accounts, expense_reports, invoices, project_profitability.
+      Use for: budget queries, expense tracking, invoice data, financial accounts, project P&L.
+
+  finance_get_table_info:
+    kind: bigquery-get-table-info
+    source: finance-bq-source
+    description: |
+      Returns schema/metadata for Finance tables (knowledge_finance).
+      ALWAYS call before writing SQL on a Finance table you haven't queried before.
+
+  finance_query_data:
+    kind: bigquery-execute-sql
+    source: finance-bq-source
+    description: |
+      Executes a read-only GoogleSQL SELECT on Finance data (knowledge_finance).
+      Use for: budget analysis, expense reports, invoice lookup, chart of accounts, project profitability.
+      Fully-qualify tables: smooth-reason-491707-f6.knowledge_finance.<table>
+      Available tables: budgets, chart_of_accounts, expense_reports, invoices, project_profitability.
+      Include LIMIT for exploratory queries.
+
+  # ===== HR TOOLS =====
+  hr_list_tables:
+    kind: bigquery-list-table-ids
+    source: hr-bq-source
+    description: |
+      Lists all table IDs in the HR dataset (knowledge_hr).
+      Tables: compensation_bands, departments, employees, performance_reviews, recruitment_pipeline, training_records.
+      Use for: employee info, HR policies, salaries, performance, hiring, training.
+
+  hr_get_table_info:
+    kind: bigquery-get-table-info
+    source: hr-bq-source
+    description: |
+      Returns schema/metadata for HR tables (knowledge_hr).
+      ALWAYS call before writing SQL on an HR table you haven't queried before.
+
+  hr_query_data:
+    kind: bigquery-execute-sql
+    source: hr-bq-source
+    description: |
+      Executes a read-only GoogleSQL SELECT on HR data (knowledge_hr).
+      Use for: employee lookup, compensation/salary bands, department structure, performance reviews, recruitment pipeline, training records.
+      Fully-qualify tables: smooth-reason-491707-f6.knowledge_hr.<table>
+      Available tables: compensation_bands, departments, employees, performance_reviews, recruitment_pipeline, training_records.
+      Include LIMIT for exploratory queries.
+
+  # ===== LEGAL TOOLS =====
+  legal_list_tables:
+    kind: bigquery-list-table-ids
+    source: legal-bq-source
+    description: |
+      Lists all table IDs in the Legal dataset (knowledge_legal).
+      Tables: compliance_register, contracts, ndas, policy_documents.
+      Use for: contract info, NDA lookup, compliance status, company policies.
+
+  legal_get_table_info:
+    kind: bigquery-get-table-info
+    source: legal-bq-source
+    description: |
+      Returns schema/metadata for Legal tables (knowledge_legal).
+      ALWAYS call before writing SQL on a Legal table you haven't queried before.
+
+  legal_query_data:
+    kind: bigquery-execute-sql
+    source: legal-bq-source
+    description: |
+      Executes a read-only GoogleSQL SELECT on Legal data (knowledge_legal).
+      Use for: contract lookup, NDA status, compliance register, policy documents, legal agreements, governing law, jurisdiction.
+      Fully-qualify tables: smooth-reason-491707-f6.knowledge_legal.<table>
+      Available tables: compliance_register, contracts, ndas, policy_documents.
+      Include LIMIT for exploratory queries.
+
+  # ===== MARKETING & SALES TOOLS =====
+  marketing_list_tables:
+    kind: bigquery-list-table-ids
+    source: marketing-bq-source
+    description: |
+      Lists all table IDs in the Marketing and Sales dataset (knowledge_marketing).
+      Tables: campaigns, case_studies, clients, competitor_intelligence, opportunities.
+      Use for: campaign performance, client info, sales pipeline, competitor data, marketing ROI.
+
+  marketing_get_table_info:
+    kind: bigquery-get-table-info
+    source: marketing-bq-source
+    description: |
+      Returns schema/metadata for Marketing and Sales tables (knowledge_marketing).
+      ALWAYS call before writing SQL on a Marketing table you haven't queried before.
+
+  marketing_query_data:
+    kind: bigquery-execute-sql
+    source: marketing-bq-source
+    description: |
+      Executes a read-only GoogleSQL SELECT on Marketing and Sales data (knowledge_marketing).
+      Use for: campaign analysis, lead generation, client lookup, competitor intelligence, sales opportunities, pipeline value.
+      Fully-qualify tables: smooth-reason-491707-f6.knowledge_marketing.<table>
+      Available tables: campaigns, case_studies, clients, competitor_intelligence, opportunities.
+      Include LIMIT for exploratory queries.
+
+toolsets:
+  app_toolset:
+    - finance_list_tables
+    - finance_get_table_info
+    - finance_query_data
+    - hr_list_tables
+    - hr_get_table_info
+    - hr_query_data
+    - legal_list_tables
+    - legal_get_table_info
+    - legal_query_data
+    - marketing_list_tables
+    - marketing_get_table_info
+    - marketing_query_data
