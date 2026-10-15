@@ -406,8 +406,3 @@ knowlytics-intelligence/
 
 This project is built as a portfolio showcase. All rights reserved © 2026 Simon SK.
 
----
-
-<div align="center">
-<i>Built with ❤️ as part of a AI Engineering designed to reflect production-grade engineering practices.</i>
-</div>
