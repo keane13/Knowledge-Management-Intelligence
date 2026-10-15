@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { API_URL } from "@/lib/utils";
 import { Message, CitationSource } from "@/types/chat";
 import { AuthUser } from "@/lib/useAuth";
 
@@ -30,14 +31,14 @@ export function useChatStream({ user, currentSessionId, setCurrentSessionId, mod
                 content: "",
                 mode,
                 thinkingSteps: [],
-                thinkingOpen: mode === "reasoning" || mode === "deep_analytic",
+                thinkingOpen: true, // Show animation tags for all modes (fast, reasoning, etc)
                 isComplete: false,
             }
         ]);
         setIsLoading(true);
 
         try {
-            const response = await fetch("http://localhost:8000/chat", {
+            const response = await fetch(`${API_URL}/chat`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -67,13 +68,20 @@ export function useChatStream({ user, currentSessionId, setCurrentSessionId, mod
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let assistantMessage = "";
+            let buffer = "";
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                const chunk = decoder.decode(value);
+                
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split("\n\n");
+                
+                // Keep the last part in the buffer if it doesn't end with \n\n
+                buffer = parts.pop() || "";
 
-                for (const line of chunk.split("\n\n")) {
+                for (const line of parts) {
+                    // SSE comments (": ping" heartbeats) match no branch below and are ignored.
                     // ── session_id ────────────────────────────────────────────
                     if (line.startsWith("event: session_id")) {
                         const sid = line.replace("event: session_id\ndata: ", "").trim();
@@ -194,6 +202,23 @@ export function useChatStream({ user, currentSessionId, setCurrentSessionId, mod
                                 return m;
                             });
                         } catch { }
+
+                    // ── error (timeouts, pipeline failures) ───────────────────
+                    } else if (line.startsWith("event: error")) {
+                        let detail = "Sorry, something went wrong.";
+                        try {
+                            const parsed = JSON.parse(line.replace("event: error\ndata: ", ""));
+                            if (parsed?.detail) detail = parsed.detail;
+                        } catch { }
+                        setMessages(prev => {
+                            const m = [...prev];
+                            const last = m[m.length - 1];
+                            if (last && last.role === "assistant") {
+                                last.content = last.content ? `${last.content}\n\n${detail}` : detail;
+                                last.thinkingOpen = false;
+                            }
+                            return m;
+                        });
                     }
                 }
             }

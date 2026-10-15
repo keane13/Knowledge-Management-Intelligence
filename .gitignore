@@ -36,9 +36,10 @@ frontend/.env.production.local
 
 # Arize Phoenix & Data
 src/infrastructure/phoenix_data/
-data/docs/
-!data/hasil_eval.json
-data/
+# Ignore everything under any data/ folder (keys, docs, history) except eval results,
+# which the dashboard reads and must be uploaded by gcloud builds submit.
+**/data/*
+!**/data/hasil_eval.json
 Skill/
 # IDEs and OS
 .vscode/
@@ -49,3 +50,35 @@ Thumbs.db
 # Large files
 frontend/.next.zip
 backend/src/infrastructure/tools/toolbox.exe
+
+# Model caches (downloaded automatically / baked into the Docker image)
+**/.flashrank_cache/
+**/.cache/
+**/__MACOSX/
+
+# Local one-off scripts and scratch tests (not part of the app)
+backend/check_*.py
+backend/fix_*.py
+backend/refactor*.py
+backend/remap_models.py
+backend/strip_openrouter.py
+backend/test_*.py
+**/* copy.py
+
+# Logs and generated evaluation/test output
+*.log
+backend/tests/test_log*.txt
+backend/tests/test_results.json
+**/results.csv
+
+# Stray old copy of the backend at the repo root
+/src/
+
+# Docs kept local only (README.md is the only Markdown pushed)
+*.md
+!/README.md
+
+# Tests, load tests and local debug/maintenance scripts
+backend/tests/
+backend/script/
+backend/src/infrastructure/tools/tools_test.yaml

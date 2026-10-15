@@ -1,0 +1,34 @@
+labenv/
+__pycache__/
+*.py[cod]
+*$py.class
+.env*
+data/docs/*
+!data/docs/.gitkeep
+chat_history.db
+evaluation/
+tests/
+*.log
+
+# Never bake credentials into the image — Cloud Run uses its service account (ADC)
+data/*_key/
+data/firestore-key/
+data/storage_key/
+data/bigquery_key/
+*.pem
+data/history/
+data/settings.json
+data/*.sqlite
+
+# Local-only binaries and dev scripts
+src/infrastructure/tools/toolbox.exe
+src/infrastructure/phoenix_data/
+test_px_data/
+script/
+check_*.py
+fix_*.py
+refactor*.py
+remap_models.py
+strip_openrouter.py
+test_*.py
+ingest_docs.py

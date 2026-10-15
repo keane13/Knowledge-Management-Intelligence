@@ -40,7 +40,7 @@ def setup_phoenix() -> None:
         return
 
     if not PHOENIX_API_KEY:
-        print("⚠️ PHOENIX_API_KEY not found. Traces may not be sent to Cloud.")
+        print("[WARNING] PHOENIX_API_KEY not found. Traces may not be sent to Cloud.")
 
     # 2. Register Phoenix as the global OTel TracerProvider
     tracer_provider = phoenix_register(project_name="rag_pro")
@@ -48,6 +48,22 @@ def setup_phoenix() -> None:
     # 4 & 5. Auto-instrument Groq SDK + LangChain
     GroqInstrumentor().instrument(tracer_provider=tracer_provider)
     LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
+    
+    # 6. Instrument LiteLLM (for valid costs & token usage in Phoenix)
+    try:
+        from openinference.instrumentation.litellm import LiteLLMInstrumentor
+        LiteLLMInstrumentor().instrument(tracer_provider=tracer_provider)
+    except ImportError:
+        print("[WARNING] LiteLLMInstrumentor not found.")
+
+    # 7. Instrument HTTP Clients (for MCP toolbox latency tracing)
+    try:
+        from opentelemetry.instrumentation.requests import RequestsInstrumentor
+        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+        RequestsInstrumentor().instrument()
+        HTTPXClientInstrumentor().instrument()
+    except ImportError:
+        print("[WARNING] HTTP instrumentors not found.")
 
     _phoenix_initialized = True
     print(f"[OK] Phoenix tracing ready - targeting Cloud endpoint {PHOENIX_COLLECTOR_ENDPOINT}")

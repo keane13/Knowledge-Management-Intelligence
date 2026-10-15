@@ -1,4 +1,5 @@
 import os
+import datetime
 import logging
 from google.cloud import firestore
 
@@ -27,3 +28,21 @@ def get_firestore_client():
     except Exception as e:
         logger.error(f"Failed to initialize Firestore client: {e}")
         raise e
+
+def user_docs_sorted(collection_ref, user_id: str, limit: int = 50):
+    """
+    Documents in collection_ref owned by user_id, newest first.
+    Sorted in Python so no composite (user_id, timestamp) index is required.
+    """
+    from google.cloud.firestore_v1.base_query import FieldFilter
+    docs = list(collection_ref.where(filter=FieldFilter("user_id", "==", user_id)).stream())
+    epoch = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+
+    def _ts(doc):
+        ts = (doc.to_dict() or {}).get("timestamp")
+        if not isinstance(ts, datetime.datetime):
+            return epoch
+        return ts if ts.tzinfo else ts.replace(tzinfo=datetime.timezone.utc)
+
+    docs.sort(key=_ts, reverse=True)
+    return docs[:limit]

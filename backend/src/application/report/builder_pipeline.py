@@ -12,6 +12,9 @@ from google.genai.types import GenerateContentConfig, ToolConfig, FunctionCallin
 from src.infrastructure.tools.mcp_toolbox import toolset
 from src.domain.agents.nlq_agent.prompts import SEARCH_AGENT_PROMPT
 from src.application.rag.pipeline import run_rag
+from src.infrastructure.llm.timeouts import (
+    NLQ_TIMEOUT_S, REPORT_TIMEOUT_S, adk_http_options, is_timeout_error, iterate_with_deadline
+)
 from langsmith import traceable
 
 logger = logging.getLogger(__name__)
@@ -35,7 +38,8 @@ def get_planner_agent() -> LlmAgent:
         model="gemini-flash-lite-latest", # Fast routing model
         instruction=PLANNER_PROMPT,
         description="Decomposes a request into SQL and RAG queries.",
-        output_key="planner_plan"
+        output_key="planner_plan",
+        generate_content_config=GenerateContentConfig(http_options=adk_http_options())
     )
 
 # --- AGENT 2: EXTRACTION WORKER ---
@@ -55,7 +59,8 @@ class ExtractionWorkerAgent(BaseAgent):
             generate_content_config=GenerateContentConfig(
                 tool_config=ToolConfig(
                     function_calling_config=FunctionCallingConfig(mode="AUTO")
-                )
+                ),
+                http_options=adk_http_options()
             )
         )
 
@@ -101,7 +106,11 @@ class ExtractionWorkerAgent(BaseAgent):
                 
                 temp_runner = Runner(agent=self.sql_agent, session_service=InMemorySessionService())
                 sql_result_str = ""
-                async for evt in temp_runner.run_async(user_id="sys", session_id="temp", new_message=runner_msg):
+                sub_events = iterate_with_deadline(
+                    temp_runner.run_async(user_id="sys", session_id="temp", new_message=runner_msg),
+                    NLQ_TIMEOUT_S,
+                )
+                async for evt in sub_events:
                      if hasattr(evt, "content") and evt.content and getattr(evt.content, "parts", None):
                         for p in evt.content.parts:
                             if getattr(p, "text", None):
@@ -110,6 +119,8 @@ class ExtractionWorkerAgent(BaseAgent):
                 extracted_context += f"#### Data Warehouse Result for '{query}':\n{sql_result_str}\n\n"
             except Exception as e:
                 logger.error(f"SQL extraction failed: {e}")
+                if is_timeout_error(e):
+                    extracted_context += f"#### Data Warehouse Result for '{query}':\n(Query timed out)\n\n"
 
         # 2. Execute RAG Queries
         for query in rag_queries:
@@ -155,7 +166,8 @@ def get_writer_agent(model_name: str = "gemini-flash-lite-latest") -> LlmAgent:
         model=model_name,
         instruction=WRITER_PROMPT,
         description="Synthesizes extracted context into a draft report.",
-        output_key="draft_report"
+        output_key="draft_report",
+        generate_content_config=GenerateContentConfig(http_options=adk_http_options())
     )
 
 # --- AGENT 4: REFLECTION ---
@@ -180,7 +192,8 @@ def get_reflection_agent(model_name: str = "gemini-flash-lite-latest") -> LlmAge
         model=model_name,
         instruction=REFLECTION_PROMPT,
         description="Reflects on the draft report and polishes it.",
-        output_key="final_report"
+        output_key="final_report",
+        generate_content_config=GenerateContentConfig(http_options=adk_http_options())
     )
 
 # --- PIPELINE BUILDER ---
@@ -215,32 +228,44 @@ class ReportBuilderUseCase:
         
         yield {"type": "status", "status": "PLANNING", "message": "Decomposing request..."}
 
-        async for event in runner.run_async(user_id=user_id, session_id=session_id, new_message=msg):
-            # Intercept Planner output
-            if getattr(event, "author", None) == "PlannerAgent":
-                pass # We can optionally emit tokens here if we want to show the JSON
+        events = iterate_with_deadline(
+            runner.run_async(user_id=user_id, session_id=session_id, new_message=msg),
+            REPORT_TIMEOUT_S,
+        )
+        try:
+            async for event in events:
+                # Intercept Planner output
+                if getattr(event, "author", None) == "PlannerAgent":
+                    pass # We can optionally emit tokens here if we want to show the JSON
 
-            # Intercept Extraction Status
-            if hasattr(event, "actions") and event.actions and getattr(event.actions, "state_delta", None):
-                delta = event.actions.state_delta
-                if "extraction_status" in delta and delta["extraction_status"] == "started":
-                    yield {"type": "status", "status": "EXTRACTING", "message": "Extracting data from sources...", "plan": delta.get("plan")}
-                if "current_extraction" in delta:
-                    yield {"type": "extraction_update", "detail": delta["current_extraction"]}
-                if "extraction_status" in delta and delta["extraction_status"] == "done":
-                    yield {"type": "status", "status": "WRITING", "message": "Synthesizing final report..."}
+                # Intercept Extraction Status
+                if hasattr(event, "actions") and event.actions and getattr(event.actions, "state_delta", None):
+                    delta = event.actions.state_delta
+                    if "extraction_status" in delta and delta["extraction_status"] == "started":
+                        yield {"type": "status", "status": "EXTRACTING", "message": "Extracting data from sources...", "plan": delta.get("plan")}
+                    if "current_extraction" in delta:
+                        yield {"type": "extraction_update", "detail": delta["current_extraction"]}
+                    if "extraction_status" in delta and delta["extraction_status"] == "done":
+                        yield {"type": "status", "status": "WRITING", "message": "Synthesizing final report..."}
 
-            # We will not stream WriterAgent to avoid double-printing in UI.
-            # Instead, we wait for ReflectionAgent to start and stream that.
-            if getattr(event, "author", None) == "ReflectionAgent":
-                # Check if it's the first reflection chunk to update status
-                if not getattr(self, "_reflection_started", False):
-                    yield {"type": "status", "status": "REFLECTING", "message": "Memoles laporan akhir (Reflection)..."}
-                    self._reflection_started = True
+                # We will not stream WriterAgent to avoid double-printing in UI.
+                # Instead, we wait for ReflectionAgent to start and stream that.
+                if getattr(event, "author", None) == "ReflectionAgent":
+                    # Check if it's the first reflection chunk to update status
+                    if not getattr(self, "_reflection_started", False):
+                        yield {"type": "status", "status": "REFLECTING", "message": "Memoles laporan akhir (Reflection)..."}
+                        self._reflection_started = True
 
-                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
-                    for part in event.content.parts:
-                        if getattr(part, "text", None):
-                            yield {"type": "chunk", "content": part.text}
+                    if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
+                        for part in event.content.parts:
+                            if getattr(part, "text", None):
+                                yield {"type": "chunk", "content": part.text}
+        except Exception as e:
+            timed_out = is_timeout_error(e)
+            logger.exception("Report Builder pipeline failed (timeout=%s)", timed_out)
+            message = (f"Report Builder tidak merespons dalam {int(REPORT_TIMEOUT_S)} detik. Silakan coba lagi."
+                       if timed_out else "Report Builder gagal menyusun laporan. Silakan coba lagi.")
+            yield {"type": "error", "message": message, "timeout": timed_out}
+            return
 
         yield {"type": "done"}

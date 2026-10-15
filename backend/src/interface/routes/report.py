@@ -7,11 +7,12 @@ from fastapi.responses import StreamingResponse
 from src.infrastructure.auth import get_current_user
 from google.adk.sessions import InMemorySessionService
 from src.application.report.builder_pipeline import ReportBuilderUseCase
+from src.infrastructure.llm.timeouts import with_heartbeat
 from src.infrastructure.tools.mcp_toolbox import toolset
 import datetime
 import uuid
 import traceback
-from src.infrastructure.firestore_client import get_firestore_client
+from src.infrastructure.firestore_client import get_firestore_client, user_docs_sorted
 from google.cloud import firestore
 
 logger = logging.getLogger(__name__)
@@ -67,13 +68,13 @@ async def build_report(
             error_data = json.dumps({"type": "error", "message": str(e)})
             yield f"data: {error_data}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(with_heartbeat(event_generator()), media_type="text/event-stream")
 
 @router.get("/history")
 async def list_report_history(current_user: str = Depends(get_current_user)):
     try:
         db = get_firestore_client()
-        docs = db.collection("report_builder_history").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(50).stream()
+        docs = user_docs_sorted(db.collection("report_builder_history"), current_user)
         
         history = []
         for doc in docs:
@@ -93,7 +94,7 @@ async def get_report_history(doc_id: str, current_user: str = Depends(get_curren
     try:
         db = get_firestore_client()
         doc = db.collection("report_builder_history").document(doc_id).get()
-        if not doc.exists:
+        if not doc.exists or doc.to_dict().get("user_id") != current_user:
             raise HTTPException(status_code=404, detail="History not found")
         data = doc.to_dict()
         if hasattr(data.get("timestamp"), "isoformat"):

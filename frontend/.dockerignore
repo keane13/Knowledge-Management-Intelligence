@@ -1,5 +1,7 @@
 node_modules
 .next
+.next.zip
+tsconfig.tsbuildinfo
 out
 build
 .env

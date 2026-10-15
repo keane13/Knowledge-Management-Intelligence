@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { API_URL } from "@/lib/utils";
 import { Upload, FileSpreadsheet, Activity, Bot, ChevronRight, BarChart2, PieChart, Info, CheckCircle2, Database, Clock, FileText } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AuthUser } from "@/lib/useAuth";
@@ -27,7 +28,7 @@ export default function DataAnalysisView({ user }: DataAnalysisViewProps) {
   useEffect(() => {
     const fetchBqTables = async () => {
       try {
-        const response = await fetch("http://localhost:8000/data-analysis/bigquery/tables", {
+        const response = await fetch(`${API_URL}/data-analysis/bigquery/tables`, {
           headers: { "Authorization": `Bearer ${user.token}` }
         });
         if (response.ok) {
@@ -41,7 +42,7 @@ export default function DataAnalysisView({ user }: DataAnalysisViewProps) {
     
     const fetchHistory = async () => {
       try {
-        const response = await fetch("http://localhost:8000/data-analysis/history", {
+        const response = await fetch(`${API_URL}/data-analysis/history`, {
           headers: { "Authorization": `Bearer ${user.token}` }
         });
         if (response.ok) {
@@ -104,7 +105,7 @@ export default function DataAnalysisView({ user }: DataAnalysisViewProps) {
     formData.append("file", fileToUpload);
 
     try {
-      const response = await fetch("http://localhost:8000/data-analysis/upload", {
+      const response = await fetch(`${API_URL}/data-analysis/upload`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${user.token}`
@@ -136,7 +137,7 @@ export default function DataAnalysisView({ user }: DataAnalysisViewProps) {
     const [dataset_id, table_id] = selectedBqTable.split(".");
 
     try {
-      const response = await fetch("http://localhost:8000/data-analysis/bigquery/analyze", {
+      const response = await fetch(`${API_URL}/data-analysis/bigquery/analyze`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${user.token}`,
@@ -164,7 +165,7 @@ export default function DataAnalysisView({ user }: DataAnalysisViewProps) {
     setResult(null);
     setError(null);
     try {
-      const response = await fetch(`http://localhost:8000/data-analysis/history/${id}`, {
+      const response = await fetch(`${API_URL}/data-analysis/history/${id}`, {
         headers: { "Authorization": `Bearer ${user.token}` }
       });
       if (!response.ok) throw new Error("Gagal memuat riwayat");
@@ -372,39 +373,10 @@ export default function DataAnalysisView({ user }: DataAnalysisViewProps) {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Left Column: Narrative & Stats */}
-              <div className="lg:col-span-1 flex flex-col gap-6">
-                
-                {/* Narrative Card */}
-                <div className="bg-gradient-to-br from-sky-600 to-blue-700 rounded-3xl p-6 shadow-lg relative overflow-hidden text-white">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Bot className="w-5 h-5 text-sky-200" />
-                    <h3 className="font-bold text-white">Executive Summary</h3>
-                  </div>
-                  <div className="prose prose-invert prose-sm max-w-none text-slate-100 leading-relaxed">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {result.narration || "Tidak ada narasi."}
-                    </ReactMarkdown>
-                  </div>
-                </div>
-
-                {/* Stats Card */}
-                <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
-                  <div className="flex items-center gap-2 mb-4">
-                    <BarChart2 className="w-5 h-5 text-sky-500" />
-                    <h3 className="font-bold text-slate-800">Highlight Statistik</h3>
-                  </div>
-                  <div className="prose prose-slate prose-sm max-w-none text-slate-600 leading-relaxed">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {result.statistical_summary || "Tidak ada ringkasan statistik."}
-                    </ReactMarkdown>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Column: 5 Analyses */}
-              <div className="lg:col-span-2 flex flex-col gap-6">
+            <div className="flex flex-col gap-8">
+              
+              {/* Top Section: 5 Analyses */}
+              <div className="flex flex-col gap-6">
                 <div className="flex items-center gap-2">
                   <h3 className="font-bold text-slate-800 text-lg">5 Analisis Mendalam</h3>
                   <div className="flex-1 h-px bg-slate-200 ml-4"></div>
@@ -434,7 +406,37 @@ export default function DataAnalysisView({ user }: DataAnalysisViewProps) {
                     )}
                   </div>
                 ))}
+              </div>
+
+              {/* Bottom Section: Narrative & Stats */}
+              <div className="flex flex-col gap-6">
                 
+                {/* Narrative Card (Executive Summary) */}
+                <div className="bg-gradient-to-br from-sky-600 to-blue-700 rounded-3xl p-8 shadow-lg relative overflow-hidden text-white w-full">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Bot className="w-6 h-6 text-sky-200" />
+                    <h3 className="font-bold text-white text-xl">Executive Summary</h3>
+                  </div>
+                  <div className="prose prose-invert max-w-none text-slate-100 leading-relaxed text-base">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {result.narration || "Tidak ada narasi."}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+
+                {/* Stats Card */}
+                <div className="bg-white rounded-3xl p-8 shadow-sm border border-slate-200 w-full">
+                  <div className="flex items-center gap-2 mb-4">
+                    <BarChart2 className="w-6 h-6 text-sky-500" />
+                    <h3 className="font-bold text-slate-800 text-xl">Highlight Statistik</h3>
+                  </div>
+                  <div className="prose prose-slate max-w-none text-slate-600 leading-relaxed text-base">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {result.statistical_summary || "Tidak ada ringkasan statistik."}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+
               </div>
             </div>
           </motion.div>

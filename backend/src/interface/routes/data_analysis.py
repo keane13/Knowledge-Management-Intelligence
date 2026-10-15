@@ -15,7 +15,7 @@ from src.infrastructure.llm.llm import generate_answer
 from google.cloud import firestore
 import datetime
 import uuid
-from src.infrastructure.firestore_client import get_firestore_client
+from src.infrastructure.firestore_client import get_firestore_client, user_docs_sorted
 
 router = APIRouter(prefix="/data-analysis", tags=["Data Analysis"])
 
@@ -37,8 +37,8 @@ def _analyze_dataframe(df: pd.DataFrame, title: str, user_id: str):
         "Tugas Anda adalah menghasilkan laporan analisis JSON terstruktur.\n\n"
         "WAJIB KEMBALIKAN OUTPUT DALAM FORMAT JSON VALID BERIKUT (Tanpa blok kode Markdown seperti ```json):\n"
         "{\n"
-        '  "narration": "Narasi insight mendalam tentang data ini dalam bahasa Indonesia.",\n'
-        '  "statistical_summary": "Ringkasan statistik penting dari data (misal distribusi, rata-rata kunci) dalam teks.",\n'
+        '  "narration": "Narasi Executive Summary yang SANGAT PANJANG, KOMPREHENSIF, dan MENDALAM (minimal 3 paragraf). Jelaskan tujuan analisis, temuan utama, pola tersembunyi, serta rekomendasi strategis.",\n'
+        '  "statistical_summary": "Highlight Statistik yang DETAIL dan PANJANG (minimal 2 paragraf). Uraikan angka-angka penting, rata-rata, standar deviasi, distribusi data, dan interpretasi makna dari statistik tersebut secara deskriptif.",\n'
         '  "analyses": [\n'
         '    {\n'
         '      "question": "Pertanyaan analisis mendalam 1 dari data?",\n'
@@ -58,7 +58,8 @@ def _analyze_dataframe(df: pd.DataFrame, title: str, user_id: str):
         '    // WAJIB BUAT TEPAT 5 ITEM DALAM ARRAY ANALYSES INI\n'
         '  ]\n'
         "}\n\n"
-        "Peraturan: Hasilkan TEPAT 5 analisis. Masing-masing analisis harus memiliki chart dengan data yang tidak kosong. "
+        "Peraturan: Hasilkan TEPAT 5 analisis. Masing-masing analisis harus memiliki chart dengan data yang tidak kosong.\n"
+        "PENTING: Pastikan 'narration' dan 'statistical_summary' ditulis dengan SANGAT PANJANG, deskriptif, dan mendalam sesuai instruksi.\n"
         "Sangat penting: Anda harus menggunakan nama key (seperti 'name', 'value', 'x', 'y') TEPAT seperti contoh di atas agar chart bisa di-render oleh Recharts."
     )
 
@@ -117,9 +118,7 @@ def _analyze_dataframe(df: pd.DataFrame, title: str, user_id: str):
 async def list_data_analysis_history(current_user: str = Depends(get_current_user)):
     try:
         db = get_firestore_client()
-        # Ensure we only fetch for current user if applicable, but for now we fetch all or limit
-        # The prompt doesn't specify user isolation, so we'll just fetch order by timestamp desc
-        docs = db.collection("data_analysis_history").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(50).stream()
+        docs = user_docs_sorted(db.collection("data_analysis_history"), current_user)
         
         history = []
         for doc in docs:
@@ -140,7 +139,7 @@ async def get_data_analysis_history(doc_id: str, current_user: str = Depends(get
     try:
         db = get_firestore_client()
         doc = db.collection("data_analysis_history").document(doc_id).get()
-        if not doc.exists:
+        if not doc.exists or doc.to_dict().get("user_id") != current_user:
             raise HTTPException(status_code=404, detail="History not found")
         data = doc.to_dict()
         if hasattr(data.get("timestamp"), "isoformat"):
@@ -183,7 +182,8 @@ def _get_bq_client():
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     key_path = os.path.join(BASE_DIR, "data", "bigquery_key", "smooth-reason-491707-f6-e931aa62cb9b.json")
     if not os.path.exists(key_path):
-        raise HTTPException(status_code=500, detail="BigQuery credentials not found.")
+        # Fallback to default credentials if file is missing (e.g. deployed to Cloud Run)
+        return bigquery.Client(project=os.getenv("GCP_PROJECT_ID"))
     credentials = service_account.Credentials.from_service_account_file(key_path)
     return bigquery.Client(credentials=credentials, project=credentials.project_id)
 

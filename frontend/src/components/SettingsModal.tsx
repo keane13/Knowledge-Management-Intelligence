@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { API_URL } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Save, Key, Server, Thermometer } from "lucide-react";
 import { AuthUser } from "@/lib/useAuth";
@@ -21,7 +22,7 @@ export default function SettingsModal({ isOpen, onClose, user }: SettingsModalPr
     useEffect(() => {
         if (isOpen) {
             // Load current settings from backend
-            fetch("http://localhost:8000/settings", {
+            fetch(`${API_URL}/settings`, {
                 headers: { "Authorization": `Bearer ${user.token}` }
             })
             .then(res => res.json())
@@ -38,7 +39,7 @@ export default function SettingsModal({ isOpen, onClose, user }: SettingsModalPr
     const handleSave = async () => {
         setIsLoading(true);
         try {
-            await fetch("http://localhost:8000/settings", {
+            await fetch(`${API_URL}/settings`, {
                 method: "POST",
                 headers: { 
                     "Content-Type": "application/json",

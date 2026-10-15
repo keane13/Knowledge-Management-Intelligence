@@ -1,178 +1,154 @@
-from groq import Groq
 from src.infrastructure.config.configs import GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY
 import base64
 from pathlib import Path
-from openai import OpenAI
+import os
+import litellm
+from src.infrastructure.llm.timeouts import LLM_REQUEST_TIMEOUT_S
 
-groq_client = Groq(api_key=GROQ_API_KEY)
-
-# Gemini client via OpenAI SDK
-gemini_client = OpenAI(
-    api_key=GEMINI_API_KEY or "dummy",
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-)
-
-# Ollama client via OpenAI SDK
-ollama_client = OpenAI(
-    api_key="ollama", # required but ignored
-    base_url="http://localhost:11434/v1"
-)
-
-from openrouter import OpenRouter
+os.environ["GROQ_API_KEY"] = GROQ_API_KEY
+os.environ["OPENROUTER_API_KEY"] = OPENROUTER_API_KEY
+os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
 
 # ─────────────────────────────────────────────
 # MODEL REGISTRY
 # ─────────────────────────────────────────────
 
 TEXT_MODELS = {
-    "gemini-flash-lite": {
-        "id": "gemini-2.5-flash", # User requested gemini-flash-lite-latest which maps to gemini-2.5-flash for standard tasks
-        "label": "Gemini Flash Lite",
-        "description": "Fast & efficient model via Google AI Studio.",
-        "context_window": 1048576,
-        "provider": "gemini",
-        "best_for": "text_generation",
-        "fallback_id": "gemini-flash-lite",
-    },
+    # ─── GEMINI MODELS ───
     "gemini-flash-lite-latest": {
-        "id": "gemini-2.5-flash", 
-        "label": "Gemini Flash Lite",
-        "description": "Fast & efficient model via Google AI Studio.",
+        "id": "gemini-flash-lite-latest", 
+        "label": "Gemini Flash Lite (Latest)",
+        "description": "Ultra fast, best for Fast Mode & Query Rewriting.",
         "context_window": 1048576,
         "provider": "gemini",
-        "best_for": "text_generation",
-        "fallback_id": "gemini-flash-lite-latest",
+        "best_for": "fast",
+        "fallback_id": "groq-llama-fast",
     },
-    "ollama-local": {
-        "id": "qwen2.5:3b",
-        "label": "Ollama Local (Secure)",
-        "description": "Locally running secure open-source model.",
+    "gemini-3-flash-preview": {
+        "id": "gemini-3-flash-preview", 
+        "label": "Gemini 3 Flash Preview",
+        "description": "High reasoning capability, best for step-by-step thinking.",
+        "context_window": 1048576,
+        "provider": "gemini",
+        "best_for": "reasoning",
+        "fallback_id": "groq-qwen-reasoning",
+    },
+    "gemini-3.5-flash-lite": {
+        "id": "gemini-3.5-flash-lite", 
+        "label": "Gemini 3.5 Flash Lite",
+        "description": "Deep analytic and heavy synthesis model.",
+        "context_window": 2097152,
+        "provider": "gemini",
+        "best_for": "deep_analytic",
+        "fallback_id": "groq-openai-oss",
+    },
+    
+    # ─── GROQ MODELS ───
+    "llama-3.3-70b-versatile": {
+        "id": "llama-3.3-70b-versatile",
+        "label": "Llama 3.3 70B (Groq)",
+        "description": "High performance versatile model.",
+        "context_window": 128000,
+        "provider": "groq",
+        "best_for": "reasoning",
+        "fallback_id": "groq-openai-oss",
+    },
+    "groq-llama-fast": {
+        "id": "groq/llama-3.1-8b-instant",
+        "label": "Llama 8B (Groq)",
+        "description": "Fallback for fast mode.",
+        "context_window": 128000,
+        "provider": "groq",
+        "best_for": "fast",
+        "fallback_id": "ollama-fast",
+    },
+    "groq-qwen-reasoning": {
+        "id": "groq/qwen-2.5-32b",
+        "label": "Qwen Reasoning (Groq)",
+        "description": "Best for complex reasoning tasks.",
+        "context_window": 128000,
+        "provider": "groq",
+        "best_for": "reasoning",
+        "fallback_id": "gemini-3-flash-preview",
+    },
+    "groq-openai-oss": {
+        "id": "groq/openai-oss",
+        "label": "OpenAI OSS (Groq)",
+        "description": "Powerful analytic fallback.",
+        "context_window": 128000,
+        "provider": "groq",
+        "best_for": "deep_analytic",
+        "fallback_id": "ollama-reasoning",
+    },
+
+    # ─── OLLAMA MODELS (LOCAL) ───
+    "ollama-fast": {
+        "id": "ollama/qwen2.5:3b",
+        "label": "Ollama Fast (Local)",
+        "description": "Local secure fast model.",
         "context_window": 32000,
         "provider": "ollama",
-        "best_for": "text_generation",
-        "fallback_id": "ollama-local",
+        "best_for": "fast",
+        "fallback_id": "ollama-fast",
     },
     "ollama-reasoning": {
-        "id": "qwen3:4b",
-        "label": "Ollama Reasoning",
-        "description": "Local reasoning model.",
+        "id": "ollama/qwen3:4b",
+        "label": "Ollama Reasoning (Local)",
+        "description": "Local secure reasoning model.",
         "context_window": 32000,
         "provider": "ollama",
         "best_for": "reasoning",
         "fallback_id": "ollama-reasoning",
     },
-    "gemma-4-31b-it": {
-        "id": "google/gemma-4-31b-it:free",
-        "label": "google/gemma-4-31b-it",
-        "description": "Fast & efficient. Great for RAG and summarisation.",
-        "context_window": 131072,
-        "provider": "openrouter",
-        "best_for": "text_generation",
-        "fallback_id": "google/gemma-4-31b-it:free",
-    },
-    "qwen3.6-27b": {
-        "id": "qwen/qwen3.6-27b",
-        "label": "qwen3.6-27b",
-        "description": "More capable variant for complex Deep reasoning tasks.",
-        "context_window": 131072,
-        "provider": "groq",
-        "best_for": "text_generation",
-        "fallback_id": "qwen/qwen3.6-27b",
-    },
-    "gpt-oss-20b": {
-        "id": "openai/gpt-oss-20b:free",
-        "label": "gpt-oss-20b",
-        "description": "More capable variant for fast & reliable conversation.",
-        "context_window": 262144,
-        "provider": "openrouter",
-        "best_for": "text_generation",
-        "fallback_id": "openai/gpt-oss-20b:free",
-    },
-    "gemma-4-26b-a4b": {
-        "id": "google/gemma-4-26b-a4b-it:free",
-        "label": "gemma-4-26b-a4b-it",
-        "description": "High-quality 70B model, best accuracy for text tasks.",
-        "context_window": 128000,
-        "provider": "openrouter",
-        "best_for": "text_generation",
-        "fallback_id": "google/gemma-4-26b-a4b-it:free",
-    },
-    "nvidia/nemotron-nano-9b-v2": {
-        "id": "nvidia/nemotron-nano-9b-v2:free",
-        "label": "nemotron-nano-9b-v2",
-        "description": "High-quality 70B model, best accuracy for text tasks.",
-        "context_window": 128000,
-        "provider": "openrouter",
-        "best_for": "text_generation",
-        "fallback_id": "nvidia/nemotron-nano-9b-v2:free",
-    },
-    "llama-3.3-70b-versatile": {
-        "id": "llama-3.3-70b-versatile",
-        "label": "llama-3.3-70b-versatile",
-        "description": "Ultra-fast, low-latency model for simple queries.",
-        "context_window": 128000,
-        "provider": "groq",
-        "best_for": "text_generation",
-        "fallback_id": "llama-3.3-70b-versatile",
-    },
-    "qwen3-4b": {
-        "id": "qwen/qwen3-4b:free",
-        "label": "Qwen3 4B",
-        "description": "Ultra-fast, low-latency model for simple queries.",
-        "context_window": 40960,
-        "provider": "openrouter",
-        "best_for": "text_generation",
-        "fallback_id": "meta-llama/llama-3.1-8b-instruct:free",
-    },
-   
 }
 
 VISION_MODELS = {
-    "llama-3.2-11b-vision": {
-        "id": "llama-3.2-11b-vision-preview",
+    "gemini-3.1-flash-lite-multimodal": {
+        "id": "gemini-3.1-flash-lite",
+        "label": "Gemini 3.1 Flash Lite Multimodal",
+        "description": "Primary vision and multimodal model.",
+        "context_window": 1048576,
+        "provider": "gemini",
+        "best_for": "vision",
+        "recommended": True,
+        "fallback_id": "groq-llama-vision",
+    },
+    "groq-llama-vision": {
+        "id": "groq/llama-3.2-11b-vision-preview",
         "label": "Llama Vision (Groq)",
-        "description": "Fast and accurate vision model via Groq.",
+        "description": "Fallback vision model.",
         "context_window": 128000,
         "provider": "groq",
         "best_for": "vision",
-        "recommended": True,
-        "fallback_id": "llama-3.2-11b-vision-preview",
-    },
-    "nemotron-3-nano": {
-        "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-        "label": "Nemo Nano Vision",
-        "description": "Best balance of speed and vision capability. Recommended.",
-        "context_window": 256000,
-        "provider": "openrouter",
-        "best_for": "vision",
         "recommended": False,
-        "fallback_id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-    },
-    "gemma-vision-free": {
-        "id": "google/gemma-4-26b-a4b-it:free",
-        "label": "Gemma Vision (Free)",
-        "description": "Google Gemma 26B Vision Model",
-        "context_window": 128000,
-        "provider": "openrouter",
-        "best_for": "vision",
-        "recommended": True,
-        "fallback_id": "google/gemma-4-26b-a4b-it:free",
-    },
+        "fallback_id": "groq-llama-vision",
+    }
 }
 
 # Default models
-DEFAULT_TEXT_MODEL      = "gemma-4-31b-it"
-DEFAULT_VISION_MODEL    = "gemma-vision-free"
+DEFAULT_TEXT_MODEL      = "gemini-flash-lite-latest"
+DEFAULT_VISION_MODEL    = "gemini-3.1-flash-lite-multimodal"
 
-# Reasoning fallback chain (tried in order on failure)
-REASONING_FALLBACK_CHAIN = [
-    "qwen3.6-27b",             # Primary: OpenRouter (Free)
-    "gemma-4-31b-it",          # Fallback 1: OpenRouter (Free)
-    "llama-3.3-70b-versatile", # Fallback 2: Groq, reliable
+# Fallback Chains (tried in order on failure)
+FAST_FALLBACK_CHAIN = [
+    "gemini-flash-lite-latest",
+    "groq-llama-fast",
+    "ollama-fast"
 ]
 
-# Graph analytic model (lighter, fast)
-GRAPH_ANALYTIC_MODEL = "llama-3.3-70b-versatile"
+REASONING_FALLBACK_CHAIN = [
+    "groq-qwen-reasoning",
+    "gemini-3-flash-preview",
+    "ollama-reasoning"
+]
+
+DEEP_ANALYTIC_CHAIN = [
+    "gemini-3.5-flash-lite",
+    "groq-openai-oss",
+    "ollama-reasoning"
+]
+
+GRAPH_ANALYTIC_MODEL = "gemini-3.5-flash-lite"
 
 
 # ─────────────────────────────────────────────
@@ -203,96 +179,35 @@ def _image_to_data_url(image_path: str) -> str:
 
 from src.infrastructure.config.settings import load_settings
 
-def _call_groq(model_id: str, messages, stream: bool, max_tokens: int = 2000):
-    """Panggil Groq API dengan API key dinamis."""
+def _call_litellm(provider: str, model_id: str, messages, stream: bool, max_tokens: int = 2000):
     settings = load_settings()
     temp = settings.get("temperature", 0.3)
-    key = settings.get("groq_api_key") or GROQ_API_KEY
     
-    client = Groq(api_key=key) if key != GROQ_API_KEY else groq_client
-    
-    response = client.chat.completions.create(
-        model=model_id,
+    if provider == "groq":
+        litellm_model = f"groq/{model_id}"
+    elif provider == "openrouter":
+        litellm_model = f"openrouter/{model_id}"
+    elif provider == "gemini":
+        litellm_model = f"gemini/{model_id}"
+    elif provider == "ollama":
+        url = settings.get("ollama_url", "http://localhost:11434")
+        litellm_model = f"ollama/{model_id}"
+        os.environ["OLLAMA_API_BASE"] = url
+    else:
+        litellm_model = model_id
+        
+    response = litellm.completion(
+        model=litellm_model,
         messages=messages,
         temperature=temp,
         max_tokens=max_tokens,
         stream=stream,
+        # Seconds per HTTP request; for streams it also bounds the gap between chunks.
+        timeout=LLM_REQUEST_TIMEOUT_S,
     )
-    return response if stream else response.choices[0].message.content
-
-def _call_gemini(model_id: str, messages, stream: bool, max_tokens: int = 2000):
-    """Panggil Gemini API via OpenAI SDK dengan API key dinamis."""
-    settings = load_settings()
-    temp = settings.get("temperature", 0.3)
-    key = settings.get("gemini_api_key") or GEMINI_API_KEY
-    
-    client = OpenAI(
-        api_key=key or "dummy",
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-    )
-    
-    response = client.chat.completions.create(
-        model=model_id,
-        messages=messages,
-        temperature=temp,
-        max_tokens=max_tokens,
-        stream=stream,
-    )
-    return response if stream else response.choices[0].message.content
-
-def _call_ollama(model_id: str, messages, stream: bool, max_tokens: int = 2000):
-    """Panggil Ollama lokal via OpenAI SDK dengan URL dinamis."""
-    settings = load_settings()
-    temp = settings.get("temperature", 0.3)
-    url = settings.get("ollama_url", "http://localhost:11434/v1")
-    
-    client = OpenAI(
-        api_key="ollama",
-        base_url=url
-    )
-    
-    response = client.chat.completions.create(
-        model=model_id,
-        messages=messages,
-        temperature=temp,
-        max_tokens=max_tokens,
-        stream=stream,
-    )
-    return response if stream else response.choices[0].message.content
-
-def _call_openrouter(model_id: str, messages, stream: bool, max_tokens: int = 2000):
-    """Panggil OpenRouter API menggunakan SDK openrouter."""
-    with OpenRouter(api_key=OPENROUTER_API_KEY) as client:
-        # Note: We use chat.completions.create if supported, otherwise chat.send
-        # Since it is an OpenAI compatible API according to the docstring,
-        # we can try chat.completions.create, but user provided client.chat.send
-        response = client.chat.send(
-            model=model_id,
-            messages=messages,
-            max_tokens=max_tokens,
-        )
-        # The user's SDK might not support native generator streaming via chat.send easily,
-        # so we will just return the full text for now.
-        if stream:
-            # Fake streaming if actual streaming is not supported by this method
-            def fake_stream():
-                class Delta:
-                    def __init__(self, content):
-                        self.content = content
-                class Choice:
-                    def __init__(self, content):
-                        self.delta = Delta(content)
-                class Chunk:
-                    def __init__(self, content):
-                        self.choices = [Choice(content)]
-                
-                content = response.choices[0].message.content
-                # stream character by character or word by word
-                words = content.split(" ")
-                for i, w in enumerate(words):
-                    yield Chunk(w + (" " if i < len(words)-1 else ""))
-            return fake_stream()
-            
+    if stream:
+        return response
+    else:
         return response.choices[0].message.content
 
 
@@ -335,19 +250,12 @@ def generate_answer(messages, stream=False, model_key: str | None = None):
     model_id    = model_info.get("id", model_key)
 
     def route_call(prov, m_id):
-        if prov == "openrouter":
-            return _call_openrouter(m_id, messages, stream)
-        elif prov == "gemini":
-            return _call_gemini(m_id, messages, stream)
-        elif prov == "ollama":
-            return _call_ollama(m_id, messages, stream)
-        else:
-            return _call_groq(m_id, messages, stream)
+        return _call_litellm(prov, m_id, messages, stream)
 
     try:
         return route_call(provider, model_id)
     except Exception as e:
-        if _is_rate_limit_error(e):
+        if _is_rate_limit_error(e) or isinstance(e, litellm.Timeout):
             fallback_key = _get_fallback_id(model_key, TEXT_MODELS)
             
             # Extract info for fallback model
@@ -404,14 +312,7 @@ def generate_reasoning_answer(
         model_id   = model_info.get("id", model_key)
         try:
             print(f"🧠 Reasoning: mencoba model [{model_key}] provider [{provider}]")
-            if provider == "openrouter":
-                return _call_openrouter(model_id, messages, stream)
-            elif provider == "gemini":
-                return _call_gemini(model_id, messages, stream, max_tokens=max_tokens)
-            elif provider == "ollama":
-                return _call_ollama(model_id, messages, stream, max_tokens=max_tokens)
-            else:
-                return _call_groq(model_id, messages, stream, max_tokens=max_tokens)
+            return _call_litellm(provider, model_id, messages, stream, max_tokens=max_tokens)
         except Exception as e:
             last_exc = e
             if _is_rate_limit_error(e):
@@ -458,22 +359,12 @@ def generate_vision_answer(
         "content": [image_content, {"type": "text", "text": prompt}],
     })
 
-    if provider == "openrouter":
-        try:
-            return _call_openrouter(model_id, messages, stream, max_tokens=1024)
-        except Exception as e:
-            if _is_rate_limit_error(e):
-                fallback_id = _get_fallback_id(model_key, VISION_MODELS)
-                print(f"⚠️ OpenRouter Vision limit. Fallback ke {fallback_id}...")
-                return _call_openrouter(fallback_id, messages, stream, max_tokens=1024)
-            raise e
-
-    else:  # provider == "groq"
-        try:
-            return _call_groq(model_id, messages, stream, max_tokens=1024)
-        except Exception as e:
-            if _is_rate_limit_error(e):
-                fallback_id = _get_fallback_id(model_key, VISION_MODELS)
-                print(f"⚠️ Groq Vision limit. Fallback ke OpenRouter {fallback_id}...")
-                return _call_openrouter(fallback_id, messages, stream, max_tokens=1024)
-            raise e
+    try:
+        return _call_litellm(provider, model_id, messages, stream, max_tokens=1024)
+    except Exception as e:
+        if _is_rate_limit_error(e):
+            fallback_id = _get_fallback_id(model_key, VISION_MODELS)
+            fb_provider = VISION_MODELS.get(fallback_id, {}).get("provider", "openrouter")
+            print(f"⚠️ {provider} Vision limit. Fallback ke {fallback_id}...")
+            return _call_litellm(fb_provider, fallback_id, messages, stream, max_tokens=1024)
+        raise e

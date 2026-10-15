@@ -2,7 +2,7 @@ import json
 from fastapi import APIRouter, HTTPException, Depends
 import datetime
 from src.infrastructure.auth import get_current_user
-from src.infrastructure.firestore_client import get_firestore_client
+from src.infrastructure.firestore_client import get_firestore_client, user_docs_sorted
 from google.cloud import firestore
 
 router = APIRouter(tags=["History"])
@@ -11,7 +11,7 @@ router = APIRouter(tags=["History"])
 def list_history(current_user: str = Depends(get_current_user)):
     try:
         db = get_firestore_client()
-        docs = db.collection("chat_sessions").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(50).stream()
+        docs = user_docs_sorted(db.collection("chat_sessions"), current_user)
         
         sessions = []
         for doc in docs:
@@ -31,7 +31,7 @@ def get_session(session_id: str, current_user: str = Depends(get_current_user)):
     try:
         db = get_firestore_client()
         session_doc = db.collection("chat_sessions").document(session_id).get()
-        if not session_doc.exists:
+        if not session_doc.exists or session_doc.to_dict().get("user_id") != current_user:
             raise HTTPException(status_code=404, detail="Session not found")
             
         data = session_doc.to_dict()
@@ -66,7 +66,8 @@ def delete_session(session_id: str, current_user: str = Depends(get_current_user
         db = get_firestore_client()
         session_ref = db.collection("chat_sessions").document(session_id)
         
-        if not session_ref.get().exists:
+        session_doc = session_ref.get()
+        if not session_doc.exists or session_doc.to_dict().get("user_id") != current_user:
             raise HTTPException(status_code=404, detail="Session not found")
             
         # Batch delete messages

@@ -7,7 +7,7 @@ import {
     CheckCircle2, Activity, BookOpen, BarChart2, LayoutDashboard,
     Sparkles, Network, ExternalLink
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, API_URL } from "@/lib/utils";
 import { Message, Session, FileItem, ThinkingStep } from "@/types/chat";
 import { motion, AnimatePresence } from "framer-motion";
 import Sidebar from "./Sidebar";
@@ -40,7 +40,7 @@ const MODE_CONFIG: Record<ChatMode, { label: string; icon: any; color: string; b
     },
 
     reasoning: {
-        label: "Reasoning",
+        label: "High Reasoning",
         icon: Sparkles,
         color: "text-amber-500",
         bg: "bg-amber-500/10 border-amber-500/20",
@@ -146,7 +146,7 @@ export default function ChatInterface({ user, onLogout }: ChatInterfaceProps) {
 
     const fetchSessions = async () => {
         try {
-            const res = await fetch("http://localhost:8000/history", {
+            const res = await fetch(`${API_URL}/history`, {
                 headers: { "Authorization": `Bearer ${user.token}` }
             });
             setSessions(await res.json());
@@ -173,7 +173,7 @@ export default function ChatInterface({ user, onLogout }: ChatInterfaceProps) {
     const handleSelectSession = async (id: string) => {
         setIsLoading(true);
         try {
-            const res = await fetch(`http://localhost:8000/history/${id}`, {
+            const res = await fetch(`${API_URL}/history/${id}`, {
                 headers: { "Authorization": `Bearer ${user.token}` }
             });
             if (res.ok) {
@@ -291,7 +291,7 @@ export default function ChatInterface({ user, onLogout }: ChatInterfaceProps) {
                 </header>
 
                 {activeView === "knowledge" ? (
-                    <KnowledgeBase onSelectionChange={setSelectedFiles} selectedFiles={selectedFiles} />
+                    <KnowledgeBase onSelectionChange={setSelectedFiles} selectedFiles={selectedFiles} token={user?.token} />
                 ) : activeView === "dashboard" ? (
                     <Dashboard />
                 ) : activeView === "documentation" ? (
@@ -558,9 +558,9 @@ export default function ChatInterface({ user, onLogout }: ChatInterfaceProps) {
                                                     )}
                                                 </AnimatePresence>
                                             </div>
-                                            
+
                                             <div className="w-px h-5 bg-slate-200 mx-1 hidden sm:block" />
-                                            
+
                                             <button
                                                 type="button"
                                                 onClick={() => setUseOllama(!useOllama)}

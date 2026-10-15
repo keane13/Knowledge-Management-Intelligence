@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { API_URL } from "@/lib/utils";
 import {
     LayoutDashboard, Activity, CheckCircle2, Bot,
     FileText, Download, Loader2, ArrowRight, Clock
@@ -29,7 +30,7 @@ export default function ReportBuilderView({ user }: ReportBuilderViewProps) {
     useEffect(() => {
         const fetchHistory = async () => {
             try {
-                const response = await fetch("http://localhost:8000/report/history", {
+                const response = await fetch(`${API_URL}/report/history`, {
                     headers: { "Authorization": `Bearer ${user.token}` }
                 });
                 if (response.ok) {
@@ -60,7 +61,7 @@ export default function ReportBuilderView({ user }: ReportBuilderViewProps) {
         setError(null);
 
         try {
-            const response = await fetch("http://localhost:8000/report/build", {
+            const response = await fetch(`${API_URL}/report/build`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -107,7 +108,8 @@ export default function ReportBuilderView({ user }: ReportBuilderViewProps) {
                             } else if (data.type === "chunk") {
                                 setReportContent(prev => prev + data.content);
                             } else if (data.type === "error") {
-                                throw new Error(data.message);
+                                setError(data.message || "Terjadi kesalahan saat menyusun laporan");
+                                setPhase("IDLE");
                             } else if (data.type === "done") {
                                 setPhase("DONE");
                                 setStatusMessage("Laporan Selesai");
@@ -160,9 +162,9 @@ export default function ReportBuilderView({ user }: ReportBuilderViewProps) {
         const opt = {
             margin:       0.5,
             filename:     'report.pdf',
-            image:        { type: 'jpeg', quality: 0.98 },
+            image:        { type: 'jpeg' as const, quality: 0.98 },
             html2canvas:  { scale: 2 },
-            jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+            jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' as const }
         };
 
         html2pdf().set(opt).from(element).save();
@@ -175,7 +177,7 @@ export default function ReportBuilderView({ user }: ReportBuilderViewProps) {
         setReportContent("");
         setError(null);
         try {
-            const response = await fetch(`http://localhost:8000/report/history/${id}`, {
+            const response = await fetch(`${API_URL}/report/history/${id}`, {
                 headers: { "Authorization": `Bearer ${user.token}` }
             });
             if (!response.ok) throw new Error("Gagal memuat riwayat");

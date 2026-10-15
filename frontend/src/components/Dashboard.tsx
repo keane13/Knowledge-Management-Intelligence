@@ -35,6 +35,11 @@ interface DashboardMetrics {
     avg_bert_score: number;
     total_documents: number;
     total_cost: number;
+    cost_available?: boolean;
+    last_trace_at?: string | null;
+    spans_sampled?: number;
+    eval_date?: string | null;
+    eval_samples?: number;
     ragas_metrics?: {
         faithfulness: number;
         answer_relevancy: number;
@@ -126,13 +131,17 @@ export default function Dashboard() {
                                 value={metrics?.avg_bert_score ? (metrics.avg_bert_score * 100).toFixed(1) : "0.0"}
                                 unit="%"
                                 icon={CheckCircle}
-                                description="Average semantic similarity across batch evaluations (RAGAS target: >80%)"
+                                description={metrics?.eval_date
+                                    ? `Last batch evaluation: ${metrics.eval_date} (${metrics.eval_samples ?? 0} samples). Target: >80%`
+                                    : "No batch evaluation results found yet"}
                             />
                             <MetricCard
                                 title="Total Estimated Cost"
-                                value={`$${metrics?.total_cost?.toFixed(4) || "0.0000"}`}
+                                value={metrics?.cost_available === false ? "n/a" : `$${metrics?.total_cost?.toFixed(4) || "0.0000"}`}
                                 icon={DollarSign}
-                                description="Estimated API usage cost based on input/output tokens"
+                                description={metrics?.cost_available === false
+                                    ? "Token usage is not reported for streamed LLM calls"
+                                    : "Estimated API usage cost based on input/output tokens"}
                             />
                             <MetricCard
                                 title="Knowledge Base"
@@ -148,6 +157,11 @@ export default function Dashboard() {
                             <Activity className="w-5 h-5 text-blue-500" />
                             Average Latency Breakdown
                         </h2>
+                        <p className="text-xs text-slate-400 -mt-2">
+                            {metrics?.last_trace_at
+                                ? `From the latest ${metrics.spans_sampled ?? 0} Phoenix spans · last trace ${new Date(metrics.last_trace_at).toLocaleString()}`
+                                : "No traces recorded yet"}
+                        </p>
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <MetricCard
@@ -195,7 +209,7 @@ export default function Dashboard() {
                                             <PolarRadiusAxis angle={30} domain={[0, 1]} tick={{ fill: '#94a3b8' }} />
                                             <Radar name="RAGAS Score" dataKey="A" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.4} />
                                             <Tooltip 
-                                                formatter={(value: number) => [(value * 100).toFixed(1) + '%', 'Score']}
+                                                formatter={(value) => [(Number(value ?? 0) * 100).toFixed(1) + '%', 'Score']}
                                                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
                                             />
                                         </RadarChart>

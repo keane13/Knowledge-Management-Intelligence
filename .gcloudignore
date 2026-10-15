@@ -1,0 +1,17 @@
+# Files NOT uploaded by `gcloud builds submit`
+.git/
+.gcloudignore
+#!include:.gitignore
+
+# Belt-and-braces: never upload secrets, keys, venvs or local build output
+.env*
+**/.env*
+**/*_key/
+**/firestore-key/
+**/labenv/
+**/node_modules/
+**/.next/
+**/*.zip
+**/*.exe
+**/__pycache__/
+Skill/

@@ -9,13 +9,16 @@ else:
 
 os.makedirs(os.environ["PHOENIX_WORKING_DIR"], exist_ok=True)
 
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+
 from fastapi import FastAPI
 # --- Arize Phoenix: INITIALISE ---
 from src.infrastructure.monitoring.phoenix_setup import setup_phoenix
 setup_phoenix()
 
 from fastapi.middleware.cors import CORSMiddleware
-from src.infrastructure.database import init_db
 
 # --- Rate Limiting ---
 from slowapi import _rate_limit_exceeded_handler
@@ -25,21 +28,43 @@ from src.interface.rate_limiter import limiter
 # --- Routers ---
 from src.interface.routes import auth, history, documents, monitoring, chat, data_analysis, report, settings
 
-app = FastAPI(title="RAG Pro API", version="2.0.0")
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Preload ML Models to prevent cold-start latency ---
+    print("Preloading ML models...")
+    try:
+        from src.application.nlq.handle_chat import get_semantic_router_hf
+        get_semantic_router_hf()
+        
+        from src.application.rag.reranker import rerank
+        # Preload the FlashRank model with a dummy query
+        from types import SimpleNamespace
+        dummy_node = SimpleNamespace(node=SimpleNamespace(text="dummy"), score=1.0)
+        rerank("dummy", [dummy_node])
+        print("ML models loaded successfully.")
+    except Exception as e:
+        print(f"Failed to preload models: {e}")
+    yield
+
+app = FastAPI(title="RAG Pro API", version="2.0.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", "")
+if allowed_origins_env:
+    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
+else:
+    allowed_origins = ["*"]  # Fallback to all for demo/easy deployment
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize Database
-init_db()
-
 # --- Include Routers ---
 app.include_router(auth.router)
 app.include_router(history.router)

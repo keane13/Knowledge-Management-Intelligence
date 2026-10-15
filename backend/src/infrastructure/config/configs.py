@@ -34,13 +34,13 @@ GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-if os.environ.get("VERCEL") == "1" or os.environ.get("VERCEL_ENV"):
+if os.environ.get("VERCEL") == "1" or os.environ.get("VERCEL_ENV") or os.environ.get("CLOUD_RUN") == "1":
     DOCS_PATH = os.path.join("/tmp", "docs")
 else:
     DOCS_PATH = os.path.join(BASE_DIR, "data", "knowledge", "documents")
 
 # Local development fallback / Vercel tmp persistence – no PostgreSQL required
-if os.environ.get("VERCEL") == "1" or os.environ.get("VERCEL_ENV"):
+if os.environ.get("VERCEL") == "1" or os.environ.get("VERCEL_ENV") or os.environ.get("CLOUD_RUN") == "1":
     _SQLITE_PATH = os.path.join("/tmp", "chat_history.db")
 else:
     _SQLITE_PATH = os.path.join(BASE_DIR, "chat_history.db")

@@ -1,0 +1,33 @@
+{
+  "project_name": "RAG Policy Intelligence Monitoring",
+  "evaluation_date": "2026-03-08",
+  "summary_metrics": {
+    "overall_rag_score": 0.8587,
+    "total_samples": 11,
+    "status": "Needs Optimization"
+  },
+  "generation_quality": {
+    "faithfulness": {
+      "score": 0.8556,
+      "description": "Sejauh mana jawaban didasarkan pada fakta di konteks."
+    },
+    "answer_relevancy": {
+      "score": 0.8153,
+      "description": "Kesesuaian jawaban dengan inti pertanyaan user."
+    },
+    "semantic_accuracy_bert": {
+      "score": 0.7782,
+      "description": "Kesamaan makna antara jawaban AI dan Ground Truth."
+    }
+  },
+  "retrieval_performance": {
+    "context_precision": {
+      "score": 0.8444,
+      "description": "Kualitas urutan dokumen yang diambil dari vector store."
+    },
+    "context_recall": {
+      "score": 1.0000,
+      "description": "Kemampuan sistem menemukan semua informasi yang dibutuhkan."
+    }
+  }
+}

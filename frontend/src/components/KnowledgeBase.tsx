@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import {
     FileText, Trash2, Zap, Upload, Database, CheckCircle2, ChevronDown, Folder, Plus, FileImage, FileAudio, X, Eye
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, API_URL } from "@/lib/utils";
 import { FileItem } from "@/types/chat";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
@@ -13,9 +13,14 @@ import remarkGfm from "remark-gfm";
 interface KnowledgeBaseProps {
     onSelectionChange: (selectedFiles: string[]) => void;
     selectedFiles: string[];
+    token?: string;
 }
 
-export default function KnowledgeBase({ onSelectionChange, selectedFiles }: KnowledgeBaseProps) {
+// Encode each path segment but keep folder separators for the {filename:path} routes
+const encodePath = (filename: string) => filename.split("/").map(encodeURIComponent).join("/");
+
+export default function KnowledgeBase({ onSelectionChange, selectedFiles, token }: KnowledgeBaseProps) {
+    const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
     const [files, setFiles] = useState<FileItem[]>([]);
     const [isUploading, setIsUploading] = useState(false);
     const [summary, setSummary] = useState<{ filename: string; text: string } | null>(null);
@@ -24,6 +29,8 @@ export default function KnowledgeBase({ onSelectionChange, selectedFiles }: Know
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
     const [uploadFolder, setUploadFolder] = useState("");
     const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [previewError, setPreviewError] = useState<string | null>(null);
     
     const docInputRef = useRef<HTMLInputElement>(null);
     const imgInputRef = useRef<HTMLInputElement>(null);
@@ -31,11 +38,35 @@ export default function KnowledgeBase({ onSelectionChange, selectedFiles }: Know
 
     useEffect(() => {
         fetchFiles();
-    }, []);
+    }, [token]);
+
+    // <img>/<iframe>/<audio> can't send an Authorization header, so load the file as a blob
+    useEffect(() => {
+        if (!viewingFile) return;
+        let objectUrl: string | null = null;
+        let cancelled = false;
+        setPreviewUrl(null);
+        setPreviewError(null);
+        fetch(`${API_URL}/files/${encodePath(viewingFile)}/content`, { headers: authHeaders })
+            .then(async (res) => {
+                if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+                return res.blob();
+            })
+            .then((blob) => {
+                if (cancelled) return;
+                objectUrl = URL.createObjectURL(blob);
+                setPreviewUrl(objectUrl);
+            })
+            .catch((err) => !cancelled && setPreviewError(String(err.message || err)));
+        return () => {
+            cancelled = true;
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+    }, [viewingFile, token]);
 
     const fetchFiles = async () => {
         try {
-            const res = await fetch("http://localhost:8000/files");
+            const res = await fetch(`${API_URL}/files`, { headers: authHeaders });
             const data = await res.json();
             const fileList = (data.files || []).map((f: any) => {
                 if (typeof f === 'string') {
@@ -66,8 +97,13 @@ export default function KnowledgeBase({ onSelectionChange, selectedFiles }: Know
             formData.append("folder", uploadFolder.trim());
         }
         try {
-            const res = await fetch("http://localhost:8000/upload", { method: "POST", body: formData });
-            if (res.ok) fetchFiles();
+            const res = await fetch(`${API_URL}/upload`, { method: "POST", body: formData, headers: authHeaders });
+            if (res.ok) {
+                fetchFiles();
+            } else {
+                const err = await res.json().catch(() => ({}));
+                alert(`Error: ${err.detail || "Failed to upload file"}`);
+            }
         } catch (e) {
             console.error(e);
         } finally {
@@ -92,7 +128,7 @@ export default function KnowledgeBase({ onSelectionChange, selectedFiles }: Know
         if (!confirm(`Are you sure you want to delete "${filename}"? This will also remove it from the search index.`)) return;
 
         try {
-            const res = await fetch(`http://localhost:8000/files/${filename}`, { method: "DELETE" });
+            const res = await fetch(`${API_URL}/files/${encodePath(filename)}`, { method: "DELETE", headers: authHeaders });
             if (res.ok) {
                 setFiles(prev => {
                     const updated = prev.filter(f => f.filename !== filename);
@@ -115,7 +151,7 @@ export default function KnowledgeBase({ onSelectionChange, selectedFiles }: Know
         e.stopPropagation();
         setIsSummarizing(filename);
         try {
-            const res = await fetch(`http://localhost:8000/files/${filename}/summarize`, { method: "POST" });
+            const res = await fetch(`${API_URL}/files/${encodePath(filename)}/summarize`, { method: "POST", headers: authHeaders });
             if (res.ok) {
                 const data = await res.json();
                 setSummary({ filename, text: data.summary });
@@ -537,7 +573,13 @@ export default function KnowledgeBase({ onSelectionChange, selectedFiles }: Know
                                 <div className="flex-1 overflow-y-auto bg-slate-100/50 p-6 flex flex-col items-center justify-center relative min-h-[50vh]">
                                     {(() => {
                                         const ext = viewingFile.split('.').pop()?.toLowerCase();
-                                        const fileUrl = `http://localhost:8000/files/${encodeURIComponent(viewingFile)}/content`;
+                                        if (previewError) {
+                                            return <p className="text-sm font-semibold text-rose-500">Could not load preview: {previewError}</p>;
+                                        }
+                                        if (!previewUrl) {
+                                            return <p className="text-sm font-semibold text-slate-400">Loading preview…</p>;
+                                        }
+                                        const fileUrl = previewUrl;
                                         if (['png', 'jpg', 'jpeg', 'webp', 'bmp'].includes(ext || '')) {
                                             return <img src={fileUrl} alt={viewingFile} className="max-w-full max-h-full object-contain rounded-xl shadow-sm border border-slate-200 bg-white" />;
                                         } else if (['mp3', 'wav', 'm4a'].includes(ext || '')) {

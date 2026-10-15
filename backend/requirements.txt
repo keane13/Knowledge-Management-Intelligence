@@ -39,8 +39,10 @@ Pillow
 passlib[bcrypt]
 openpyxl
 
-# Llama Index for Semantic Chunking
+# Llama Index
+llama-index
 llama-index-core
+llama-index-vector-stores-weaviate
 llama-index-embeddings-openai
 llama-index-embeddings-huggingface
 langchain-huggingface
@@ -53,3 +55,26 @@ networkx>=3.3
 # Google Cloud
 google-cloud-storage
 google-cloud-bigquery
+google-cloud-firestore>=2.28.1
+google-cloud-secret-manager
+
+# Imported by the app but previously missing (versions match the working labenv)
+slowapi==0.1.10
+PyJWT==2.13.0
+bcrypt==5.0.0
+google-adk==2.6.3
+google-genai==2.17.0
+langgraph==1.2.10
+langsmith==0.10.17
+litellm==1.96.0
+semantic-router==0.1.16
+FlashRank==0.2.10
+guardrails-ai==0.10.2
+nltk==3.10.2
+python-pptx==1.0.2
+openai
+requests
+toolbox-adk==1.3.1
+openinference-instrumentation-litellm
+opentelemetry-instrumentation-requests
+opentelemetry-instrumentation-httpx

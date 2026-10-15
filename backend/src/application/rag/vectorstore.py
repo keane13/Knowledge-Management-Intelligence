@@ -1,12 +1,15 @@
 import weaviate
 from weaviate.classes.init import Auth
-from langchain_weaviate.vectorstores import WeaviateVectorStore
+from llama_index.vector_stores.weaviate import WeaviateVectorStore
+from llama_index.core import VectorStoreIndex, Settings
 from src.infrastructure.config.configs import WEAVIATE_API_KEY, WEAVIATE_URL
+
 # ========= SINGLETONS =========
 
 _client = None
-_embeddings = None
 _vectorstore = None
+_index = None
+_settings_configured = False
 
 
 def get_weaviate_client():
@@ -20,36 +23,51 @@ def get_weaviate_client():
     return _client
 
 
-def get_embeddings():
-    global _embeddings
-    if _embeddings is None:
-        import os
-        hf_token = os.environ.get("HUGGINGFACE_TOKEN")
-        try:
-            from langchain_huggingface import HuggingFaceEndpointEmbeddings
-            _embeddings = HuggingFaceEndpointEmbeddings(
-                model="BAAI/bge-small-en-v1.5",
-                huggingfacehub_api_token=hf_token
+def init_knowledge_base():
+    """Ensure KnowledgeBase collection exists with Snowflake Arctic vectorizer."""
+    client = get_weaviate_client()
+    if not client.collections.exists("KnowledgeBase"):
+        import weaviate.classes.config as wc
+        client.collections.create(
+            "KnowledgeBase",
+            vectorizer_config=wc.Configure.Vectorizer.text2vec_weaviate(
+                model="Snowflake/snowflake-arctic-embed-l-v2.0"
             )
-        except ImportError:
-            # Fallback if EndpointEmbeddings isn't available
-            from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
-            _embeddings = HuggingFaceInferenceAPIEmbeddings(
-                api_key=hf_token, model_name="BAAI/bge-small-en-v1.5"
-            )
-    return _embeddings
+        )
+
+def setup_settings():
+    global _settings_configured
+    if not _settings_configured:
+        # Menjalankan BAAI/bge-small-en-v1.5 secara LOKAL untuk menghindari bottleneck API HF Gratis.
+        # Jauh lebih stabil dan latensi konsisten dibandingkan API Endpoint.
+        from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+        embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        
+        Settings.embed_model = embed_model
+        Settings.llm = None  # Kita menggunakan custom LLM router
+        _settings_configured = True
 
 
 def get_vectorstore():
     """
-    ⚡ FAST INFERENCE VECTORSTORE
+    ⚡ FAST INFERENCE VECTORSTORE (LlamaIndex Weaviate)
     """
     global _vectorstore
     if _vectorstore is None:
+        init_knowledge_base()
         _vectorstore = WeaviateVectorStore(
-            client=get_weaviate_client(),
-            embedding=get_embeddings(),
-            index_name="KnowledgeBase",  # MUST MATCH schema
-            text_key="text"
+            weaviate_client=get_weaviate_client(),
+            index_name="KnowledgeBase",
         )
     return _vectorstore
+
+
+def get_index():
+    """
+    Mendapatkan LlamaIndex VectorStoreIndex singleton.
+    """
+    global _index
+    if _index is None:
+        setup_settings()
+        _index = VectorStoreIndex.from_vector_store(vector_store=get_vectorstore())
+    return _index

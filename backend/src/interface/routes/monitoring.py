@@ -1,13 +1,16 @@
 import os
 import json
 import math
-import pandas as pd
-from fastapi import APIRouter, Response
+import time
+from datetime import datetime
+import requests
+from fastapi import APIRouter, Response, Depends
 from fastapi.responses import RedirectResponse
 from src.application.rag.vectorstore import get_weaviate_client
 from src.infrastructure.llm.llm import generate_answer, DEFAULT_TEXT_MODEL
 from src.infrastructure.config.configs import DOCS_PATH
 from pathlib import Path
+from src.infrastructure.auth import get_current_user
 
 router = APIRouter(tags=["Monitoring"])
 
@@ -42,14 +45,72 @@ def health_check():
         
     return health_status
 
+# ── Dashboard ────────────────────────────────────────────────────────────────
+# Latencies come from Phoenix spans (cloud or self-hosted) via its REST API; RAGAS scores come
+# from the last batch evaluation written to data/hasil_eval.json by the evaluation pipeline.
+
+PHOENIX_PROJECT = os.getenv("PHOENIX_PROJECT_NAME", "rag_pro")
+EVAL_RESULTS_PATH = Path(__file__).resolve().parents[3] / "data" / "hasil_eval.json"
+_METRICS_TTL_SEC = 60
+_metrics_cache = {"at": 0.0, "value": None}
+
+
+def _phoenix_api():
+    """Base URL + auth headers for the Phoenix REST API (derived from the OTLP collector endpoint)."""
+    endpoint = os.environ.get("PHOENIX_COLLECTOR_ENDPOINT", "").rstrip("/")
+    if endpoint.endswith("/v1/traces"):
+        endpoint = endpoint[: -len("/v1/traces")]
+    api_key = os.getenv("PHOENIX_API_KEY")
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    return endpoint, headers
+
+
+def _fetch_spans(base: str, headers: dict, limit: int = 100, **filters) -> list:
+    params = {"limit": limit, **filters}
+    resp = requests.get(f"{base}/v1/projects/{PHOENIX_PROJECT}/spans", headers=headers, params=params, timeout=10)
+    resp.raise_for_status()
+    return resp.json().get("data", [])
+
+
+def _span_seconds(span: dict):
+    try:
+        start = datetime.fromisoformat(span["start_time"])
+        end = datetime.fromisoformat(span["end_time"])
+        return (end - start).total_seconds()
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _avg_seconds(spans: list) -> float:
+    durations = [d for d in (_span_seconds(s) for s in spans) if d is not None and d >= 0]
+    return round(sum(durations) / len(durations), 4) if durations else 0.0
+
+
+def _count_documents() -> int:
+    """Documents in the knowledge bucket (source of truth on Cloud Run); local folder as fallback."""
+    try:
+        from src.interface.routes.documents import _gcs_client, GCS_BUCKET_NAME
+        return sum(1 for b in _gcs_client().bucket(GCS_BUCKET_NAME).list_blobs() if not b.name.endswith("/"))
+    except Exception as e:
+        print(f"GCS document count failed, using local folder: {e}")
+    if os.path.exists(DOCS_PATH):
+        return sum(1 for p in Path(DOCS_PATH).rglob("*") if p.is_file())
+    return 0
+
+
+def _safe_float(val, default=0.0):
+    try:
+        f = float(val)
+        return default if (math.isnan(f) or math.isinf(f)) else f
+    except (TypeError, ValueError):
+        return default
+
+
 @router.get("/dashboard/metrics")
 def get_dashboard_metrics():
-    def safe_float(val, default=0.0):
-        try:
-            f = float(val)
-            return default if (math.isnan(f) or math.isinf(f)) else f
-        except:
-            return default
+    now = time.time()
+    if _metrics_cache["value"] is not None and now - _metrics_cache["at"] < _METRICS_TTL_SEC:
+        return _metrics_cache["value"]
 
     metrics = {
         "avg_retrieval_latency": 0.0,
@@ -57,152 +118,86 @@ def get_dashboard_metrics():
         "avg_generation_latency": 0.0,
         "avg_bert_score": 0.0,
         "ragas_score": 0.0,
-        "total_documents": 0,
+        "total_documents": _count_documents(),
         "total_cost": 0.0,
-        "debug_status": "Starting..."
+        # Streamed LLM calls do not report token usage, so cost can't be computed from traces
+        "cost_available": False,
+        "spans_sampled": 0,
+        "last_trace_at": None,
+        "debug_status": "Starting...",
+        "ragas_metrics": {
+            "faithfulness": 0.0,
+            "answer_relevancy": 0.0,
+            "context_precision": 0.0,
+            "context_recall": 0.0,
+            "semantic_accuracy": 0.0,
+        },
+        "eval_date": None,
+        "eval_samples": 0,
     }
 
-    if os.path.exists(DOCS_PATH):
-        base_path = Path(DOCS_PATH)
-        metrics["total_documents"] = sum(1 for p in base_path.rglob('*') if p.is_file())
-
-    try:
-        api_key = os.getenv("PHOENIX_API_KEY")
-        if not api_key:
-            metrics["debug_status"] = "ERROR: PHOENIX_API_KEY is not set."
-        else:
-            from phoenix.client import Client
-            client = Client(
-                base_url="https://app.phoenix.arize.com",
-                api_key=api_key,
-            )
-
-            df = client.spans.get_spans_dataframe(
-                project_identifier="rag_pro",
-                limit=50,
-            )
-
-            if df is None or df.empty:
-                metrics["debug_status"] = "SUCCESS: Connected but DataFrame is EMPTY."
-            else:
-                metrics["debug_status"] = f"SUCCESS: Fetched {len(df)} spans."
-
-                # ── Duration ──────────────────────────────────────────────────────────
-                if 'latency_ms' in df.columns:
-                    df['duration_sec'] = pd.to_numeric(df['latency_ms'], errors='coerce') / 1000.0
-                else:
-                    df['start_time']   = pd.to_datetime(df['start_time'], errors='coerce')
-                    df['end_time']     = pd.to_datetime(df['end_time'],   errors='coerce')
-                    df['duration_sec'] = (df['end_time'] - df['start_time']).dt.total_seconds()
-
-                # ── Retrieval & Rerank (use their own spans) ──────────────────────────
-                retrieval_df = df[df['name'].str.lower() == 'retrieval']
-                if not retrieval_df.empty:
-                    metrics["avg_retrieval_latency"] = safe_float(
-                        retrieval_df['duration_sec'].dropna().mean()
-                    )
-
-                rerank_df = df[df['name'].str.lower() == 'rerank']
-                if not rerank_df.empty:
-                    metrics["avg_rerank_latency"] = safe_float(
-                        rerank_df['duration_sec'].dropna().mean()
-                    )
-
-                # ── Generation: use "Completions" (actual LLM call), NOT "generation" ─
-                completions_df = df[df['name'] == 'Completions']
-                if not completions_df.empty:
-                    metrics["avg_generation_latency"] = safe_float(
-                        completions_df['duration_sec'].dropna().mean()
-                    )
-
-                # ── Cost: token count from Completions spans ──────────────────────────
-                for cost_col in [
-                    'attributes.llm.usage.total_cost',
-                    'attributes.llm.token.count.completion',
-                    'attributes.llm.token.count.total',
-                ]:
-                    if cost_col in df.columns:
-                        val = completions_df[cost_col].dropna().astype(float).sum()
-                        metrics["total_cost"] = safe_float(val)
-                        if metrics["total_cost"] > 0:
-                            break
-
-                # ── RAGAS Score ───────────────────────────────────────────────────────
-                ragas_col = 'attributes.eval.ragas.f1_score'
-                if ragas_col in df.columns:
-                    val = df[ragas_col].dropna().astype(float).mean()
-                    metrics["avg_bert_score"] = safe_float(val)
-
-    except Exception as e:
-        metrics["debug_status"] = f"ERROR: {type(e).__name__}: {str(e)}"
-
-    # Provide default RAGAS metrics structure
-    metrics["ragas_metrics"] = {
-        "faithfulness": 0.0,
-        "answer_relevancy": 0.0,
-        "context_precision": 0.0,
-        "context_recall": 0.0,
-        "semantic_accuracy": 0.0
-    }
-
-    eval_path = os.path.join(DOCS_PATH, "..", "hasil_eval.json")
-    if not os.path.exists(eval_path):
-        # Fix: Need to go up 4 levels to get to rag_pro_v3 from routes directory
-        BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        eval_path = os.path.join(BASE_DIR, "data", "hasil_eval.json")
-    
-    if os.path.exists(eval_path):
+    # ── Latencies from Phoenix traces ────────────────────────────────────────
+    base, headers = _phoenix_api()
+    if not base:
+        metrics["debug_status"] = "ERROR: PHOENIX_COLLECTOR_ENDPOINT is not set."
+    else:
         try:
-            with open(eval_path, "r") as f:
-                eval_data = json.load(f)
-                
-                if metrics["avg_bert_score"] == 0.0:
-                    metrics["avg_bert_score"] = safe_float(eval_data.get("summary_metrics", {}).get("overall_rag_score", 0.0))
-                
-                gen_qual = eval_data.get("generation_quality", {})
-                ret_perf = eval_data.get("retrieval_performance", {})
-                
-                metrics["ragas_metrics"] = {
-                    "faithfulness": safe_float(gen_qual.get("faithfulness", {}).get("score", 0.0)),
-                    "answer_relevancy": safe_float(gen_qual.get("answer_relevancy", {}).get("score", 0.0)),
-                    "context_precision": safe_float(ret_perf.get("context_precision", {}).get("score", 0.0)),
-                    "context_recall": safe_float(ret_perf.get("context_recall", {}).get("score", 0.0)),
-                    "semantic_accuracy": safe_float(gen_qual.get("semantic_accuracy_bert", {}).get("score", 0.0))
-                }
-        except Exception:
-            pass
+            retrieval = _fetch_spans(base, headers, name="retrieval")
+            rerank = _fetch_spans(base, headers, name="rerank")
+            # The "generation" span only builds the prompt; the LLM call itself is the LLM-kind span
+            llm = _fetch_spans(base, headers, span_kind="LLM")
+            metrics["avg_retrieval_latency"] = _avg_seconds(retrieval)
+            metrics["avg_rerank_latency"] = _avg_seconds(rerank)
+            metrics["avg_generation_latency"] = _avg_seconds(llm)
+            sampled = retrieval + rerank + llm
+            metrics["spans_sampled"] = len(sampled)
+            metrics["last_trace_at"] = max((s.get("start_time") for s in sampled if s.get("start_time")), default=None)
+            metrics["debug_status"] = (
+                f"SUCCESS: {len(retrieval)} retrieval, {len(rerank)} rerank, {len(llm)} LLM spans from Phoenix"
+                if sampled else "SUCCESS: Connected to Phoenix but no RAG spans recorded yet."
+            )
+        except Exception as e:
+            metrics["debug_status"] = f"ERROR: {type(e).__name__}: {str(e)[:200]}"
 
+    # ── RAGAS scores from the last batch evaluation ──────────────────────────
+    if EVAL_RESULTS_PATH.exists():
+        try:
+            eval_data = json.loads(EVAL_RESULTS_PATH.read_text(encoding="utf-8"))
+            summary = eval_data.get("summary_metrics", {})
+            gen_qual = eval_data.get("generation_quality", {})
+            ret_perf = eval_data.get("retrieval_performance", {})
+            overall = _safe_float(summary.get("overall_rag_score", 0.0))
+            metrics["avg_bert_score"] = overall
+            metrics["ragas_score"] = overall
+            metrics["eval_date"] = eval_data.get("evaluation_date")
+            metrics["eval_samples"] = int(summary.get("total_samples") or 0)
+            metrics["ragas_metrics"] = {
+                "faithfulness": _safe_float(gen_qual.get("faithfulness", {}).get("score", 0.0)),
+                "answer_relevancy": _safe_float(gen_qual.get("answer_relevancy", {}).get("score", 0.0)),
+                "context_precision": _safe_float(ret_perf.get("context_precision", {}).get("score", 0.0)),
+                "context_recall": _safe_float(ret_perf.get("context_recall", {}).get("score", 0.0)),
+                "semantic_accuracy": _safe_float(gen_qual.get("semantic_accuracy_bert", {}).get("score", 0.0)),
+            }
+        except Exception as e:
+            print(f"Failed to read evaluation results: {e}")
+
+    _metrics_cache.update(at=now, value=metrics)
     return metrics
 
+
 @router.get("/dashboard/debug")
-def get_debug_spans():
-    """Temporary debug endpoint - shows raw Phoenix span data."""
-    from phoenix.client import Client
-
+def get_debug_spans(current_user: str = Depends(get_current_user)):
+    """Raw Phoenix span sample for troubleshooting the dashboard (login required)."""
+    base, headers = _phoenix_api()
     try:
-        client = Client(
-            base_url="https://app.phoenix.arize.com",
-            api_key=os.getenv("PHOENIX_API_KEY"),
-        )
-
-        df = client.spans.get_spans_dataframe(
-            project_identifier="rag_pro",
-            limit=20,
-        )
-
-        if df is None or df.empty:
-            return {"error": "Empty dataframe"}
-
-        target_spans = df[df['name'].str.lower().isin(['retrieval', 'rerank', 'generation'])]
-
+        spans = _fetch_spans(base, headers, limit=50)
+        names = sorted({s.get("name") for s in spans})
         return {
-            "total_spans_fetched": len(df),
-            "all_column_names": list(df.columns),
-            "target_span_count": len(target_spans),
-            "target_spans_raw": target_spans.to_dict(orient='records'),
-            "all_span_names": df['name'].unique().tolist(),
+            "phoenix_project": PHOENIX_PROJECT,
+            "total_spans_fetched": len(spans),
+            "all_span_names": names,
+            "newest_span_at": max((s.get("start_time") for s in spans if s.get("start_time")), default=None),
+            "sample": spans[:3],
         }
-
     except Exception as e:
-        import traceback
-        return {"error": str(e), "trace": traceback.format_exc()}
+        return {"error": f"{type(e).__name__}: {e}"}

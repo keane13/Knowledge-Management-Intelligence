@@ -1,27 +1,35 @@
-from weaviate.classes.query import HybridFusion, Filter
+import weaviate.classes.query as wq
+from llama_index.core.schema import NodeWithScore, Document
+from src.application.rag.vectorstore import get_weaviate_client
 
 def retrieve(vectorstore, query, k=5, selected_files=None):
-    search_kwargs = {
-        "alpha": 0.5,
-        "fusion_type": HybridFusion.RELATIVE_SCORE
-    }
+    """
+    Mengambil dokumen menggunakan pencarian native Weaviate (nearText) 
+    agar memanfaatkan embedding Snowflake dari sisi Weaviate Cloud.
+    """
+    client = get_weaviate_client()
+    collection = client.collections.get("KnowledgeBase")
     
-    if selected_files:
-        # Construct filter: source LIKE *filename1 OR source LIKE *filename2 ...
-        # Note: Weaviate Like support depends on tokenization. 'source' is usually 'pydantic_text' or similar. 
-        # Safest for 'source' paths is usually Contains or Like with wildcards if supported.
-        # Assuming v4 client filter syntax:
+    filters = None
+    if selected_files and len(selected_files) > 0:
+        filters = wq.Filter.by_property("source").equal(selected_files[0])
         
-        file_filters = [Filter.by_property("source").like(f"*{f}") for f in selected_files]
-        if len(file_filters) > 1:
-            combined_filter = Filter.any_of(file_filters)
-        else:
-            combined_filter = file_filters[0]
-            
-        search_kwargs["filters"] = combined_filter
-
-    return vectorstore.similarity_search(
-        query,
-        k=k,
-        **search_kwargs
+    response = collection.query.near_text(
+        query=query,
+        limit=k,
+        filters=filters,
+        return_metadata=wq.MetadataQuery(score=True, distance=True)
     )
+    
+    nodes_with_score = []
+    for obj in response.objects:
+        # Weaviate VectorStoreIndex default stores node content in 'text' property
+        text_content = obj.properties.get("text", "")
+        # Other properties are metadata
+        metadata = {key: val for key, val in obj.properties.items() if key != "text"}
+        
+        node = Document(text=text_content, metadata=metadata)
+        score = obj.metadata.score if obj.metadata.score is not None else 0.0
+        nodes_with_score.append(NodeWithScore(node=node, score=score))
+        
+    return nodes_with_score

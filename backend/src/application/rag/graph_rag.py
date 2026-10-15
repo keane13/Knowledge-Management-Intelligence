@@ -190,145 +190,179 @@ def paths_to_context_text(paths: List[tuple], chunks: List[Tuple[str, dict]], G)
     return "\n".join(lines)
 
 
-# ─── MAIN ASYNC GENERATOR ────────────────────────────────────────────────────
 
-async def run_graph_rag(
-    question: str,
-    selected_files=None,
-    stream: bool = True,
-) -> AsyncGenerator[Dict[str, Any], None]:
-    """
-    Deep Analytic: GraphRAG pipeline dengan streaming thinking steps.
-    """
+# ─── LANGGRAPH STATE & NODES ────────────────────────────────────────────────
+from typing import TypedDict, Optional, List, Dict, Any, Union, Tuple
+from langgraph.graph import StateGraph, END
+import asyncio
+import os
+
+class GraphRagState(TypedDict):
+    question: str
+    selected_files: Optional[List[str]]
+    stream: bool
+    
+    ranked_docs: List[Any]
+    chunks: List[Tuple[str, dict]]
+    all_sources: List[Dict]
+    
+    G: Any
+    chunk_entity_map: dict
+    
+    graph_context: str
+    standard_context: str
+    
+    events: List[Dict[str, Any]]
+    final_answer: str
+    final_sources: List[Dict[str, Any]]
+
+async def retrieve_node(state: GraphRagState) -> Dict:
     from src.application.rag.vectorstore import get_vectorstore
     from src.application.rag.retriever import retrieve
     from src.application.rag.reranker import rerank
-    from src.infrastructure.llm.llm import generate_answer, GRAPH_ANALYTIC_MODEL
-    from src.domain.prompt.prompt import build_graph_analytic_prompt
-
-    vectorstore = get_vectorstore()
-    all_sources = []
-
-    # ── THINKING STEP 1: Retrieve ────────────────────────────────────────────
-    yield {
+    
+    events = []
+    question = state["question"]
+    
+    events.append({
         "type": "thinking_step",
         "step": "searching",
         "content": f"🔍 **Deep Analytic:** Mencari dokumen relevan untuk analisis mendalam...\nQuery: \"{question[:100]}\""
-    }
-    await asyncio.sleep(0.03)
-
+    })
+    
+    vectorstore = get_vectorstore()
+    all_sources = []
+    
     try:
-        # Retrieve lebih banyak (10) untuk graph yang lebih kaya
-        raw_docs = retrieve(vectorstore, question, k=10, selected_files=selected_files)
+        raw_docs = retrieve(vectorstore, question, k=10, selected_files=state.get("selected_files"))
         ranked_docs = rerank(question, raw_docs)[:8]
     except Exception as e:
         logger.error(f"GraphRAG retrieval error: {e}")
-        yield {
+        events.append({
             "type": "thinking_step",
             "step": "searching",
             "content": f"❌ Gagal mengambil dokumen: {str(e)[:100]}"
-        }
-        yield {"type": "chunk", "content": f"Terjadi kesalahan saat mengambil dokumen: {e}"}
-        return
-
-    # Siapkan chunks
-    chunks: List[Tuple[str, dict]] = [(d.page_content, d.metadata) for d, _ in ranked_docs]
-    standard_context = "\n\n".join([c[0] for c in chunks[:5]])  # Top-5 untuk standard
-
-    # Kumpulkan sumber
-    for d, _ in ranked_docs:
-        src = d.metadata.get("source", "Unknown")
+        })
+        return {"events": events, "final_answer": f"Terjadi kesalahan saat mengambil dokumen: {e}"}
+        
+    chunks = [(n.node.text, n.node.metadata) for n in ranked_docs]
+    standard_context = "\n\n".join([c[0] for c in chunks[:5]])
+    
+    for d in ranked_docs:
+        src = d.node.metadata.get("source", "Unknown")
         if src not in [s.get("source") for s in all_sources]:
             all_sources.append({"source": src, "metadata": d.metadata})
-
-    yield {
+            
+    events.append({
         "type": "thinking_step",
         "step": "searching",
         "content": (
             f"✅ **{len(ranked_docs)} dokumen ditemukan.**\n"
             f"Sumber: {', '.join(set(os.path.basename(c[1].get('source', 'Unknown')) for c in chunks[:5]))}"
         )
+    })
+    
+    return {
+        "ranked_docs": ranked_docs,
+        "chunks": chunks,
+        "standard_context": standard_context,
+        "all_sources": all_sources,
+        "events": events
     }
-    await asyncio.sleep(0.03)
 
-    # ── THINKING STEP 2: Build Graph ─────────────────────────────────────────
-    yield {
+async def build_graph_node(state: GraphRagState) -> Dict:
+    events = []
+    if "final_answer" in state and state["final_answer"]:
+        return {} # Short-circuit if failed in retrieve
+        
+    events.append({
         "type": "thinking_step",
         "step": "graph_building",
         "content": "🕸️ **Membangun knowledge graph** dari entitas dalam dokumen..."
-    }
-    await asyncio.sleep(0.03)
-
-    G, chunk_entity_map = build_entity_graph(chunks)
-
+    })
+    
+    G, chunk_entity_map = build_entity_graph(state.get("chunks", []))
+    
     if G is not None:
         node_count = G.number_of_nodes()
         edge_count = G.number_of_edges()
-
-        yield {
+        events.append({
             "type": "thinking_step",
             "step": "graph_building",
             "content": (
                 f"✅ **Graph dibangun:** {node_count} entitas, {edge_count} relasi.\n"
                 f"Mencari jalur relasi yang relevan dengan pertanyaan..."
             )
-        }
+        })
     else:
-        yield {
+        events.append({
             "type": "thinking_step",
             "step": "graph_building",
             "content": "⚠️ Graph module tidak tersedia, menggunakan standard RAG context."
-        }
-    await asyncio.sleep(0.03)
+        })
+        
+    return {"G": G, "chunk_entity_map": chunk_entity_map, "events": events}
 
-    # ── THINKING STEP 3: Graph Traversal ─────────────────────────────────────
+async def traverse_node(state: GraphRagState) -> Dict:
+    events = []
+    if "final_answer" in state and state["final_answer"]:
+        return {}
+        
     graph_context = ""
-
+    G = state.get("G")
+    chunks = state.get("chunks", [])
+    question = state["question"]
+    
     if G is not None and G.number_of_nodes() > 0:
-        yield {
+        events.append({
             "type": "thinking_step",
             "step": "graph_traversal",
             "content": "🔗 **Menelusuri relasi antar entitas** (BFS traversal)..."
-        }
-        await asyncio.sleep(0.03)
-
+        })
+        
         seed_entities = extract_entities_from_question(question)
         paths = bfs_traverse(G, seed_entities, max_depth=2, max_nodes=25)
-
+        
         if paths:
             graph_context = paths_to_context_text(paths, chunks, G)
-            yield {
+            events.append({
                 "type": "thinking_step",
                 "step": "graph_traversal",
                 "content": (
                     f"✅ **{len(paths)} jalur relasi ditemukan.**\n"
                     f"Seed entitas: {', '.join(seed_entities[:5])}"
                 )
-            }
+            })
         else:
             graph_context = "Tidak ditemukan relasi graph yang spesifik untuk pertanyaan ini."
-            yield {
+            events.append({
                 "type": "thinking_step",
                 "step": "graph_traversal",
                 "content": "ℹ️ Tidak ditemukan jalur relasi spesifik. Menggunakan standard context."
-            }
+            })
+            
+    return {"graph_context": graph_context, "events": events}
 
-        # Bersihkan graph dari memori setelah digunakan
-        del G
-        del chunk_entity_map
-
-    await asyncio.sleep(0.03)
-
-    # ── THINKING STEP 4: Generate ─────────────────────────────────────────────
-    yield {
+async def generate_node(state: GraphRagState) -> Dict:
+    from src.infrastructure.llm.llm import generate_answer, GRAPH_ANALYTIC_MODEL
+    from src.domain.prompt.prompt import build_graph_analytic_prompt
+    
+    events = []
+    if "final_answer" in state and state["final_answer"]:
+        return {}
+        
+    events.append({
         "type": "thinking_step",
         "step": "generating",
         "content": "✍️ **Menganalisis dan menyintesis jawaban** dari dokumen + knowledge graph..."
-    }
-    await asyncio.sleep(0.03)
-
-    messages = build_graph_analytic_prompt(question, standard_context, graph_context)
-
+    })
+    
+    messages = build_graph_analytic_prompt(
+        state["question"], 
+        state.get("standard_context", ""), 
+        state.get("graph_context", "")
+    )
+    
     try:
         answer_raw = generate_answer(messages, stream=False, model_key=GRAPH_ANALYTIC_MODEL)
         if not isinstance(answer_raw, str):
@@ -336,17 +370,10 @@ async def run_graph_rag(
     except Exception as e:
         logger.error(f"GraphRAG generation error: {e}")
         answer_raw = f"Terjadi kesalahan saat analisis: {e}"
-
-    # Stream final answer
-    words = answer_raw.split(" ")
-    for i, w in enumerate(words):
-        yield {"type": "chunk", "content": w + (" " if i < len(words) - 1 else "")}
-        await asyncio.sleep(0.012)
-
-    # ── CITATION ──────────────────────────────────────────────────────────────
+        
     citation_sources = []
     seen = set()
-    for src_info in all_sources:
+    for src_info in state.get("all_sources", []):
         raw_path = src_info.get("source", "Unknown")
         filename = os.path.basename(raw_path) if raw_path != "Unknown" else "Unknown"
         if filename not in seen:
@@ -355,9 +382,113 @@ async def run_graph_rag(
                 "filename": filename,
                 "full_path": raw_path,
             })
+            
+    return {"events": events, "final_answer": answer_raw, "final_sources": citation_sources}
 
-    yield {
-        "type": "citation",
-        "sources": citation_sources,
-        "mode": "deep_analytic",
+
+async def evaluate_node(state: GraphRagState) -> Dict:
+    from src.infrastructure.llm.llm import generate_answer, GRAPH_ANALYTIC_MODEL
+    events = []
+    if "final_answer" not in state or not state["final_answer"]:
+        return {}
+        
+    events.append({
+        "type": "thinking_step",
+        "step": "evaluating",
+        "content": "⚖️ **LLM-as-a-Judge:** Mengevaluasi dan memoles kualitas jawaban akhir..."
+    })
+    
+    judge_prompt = (
+        "Anda adalah AI Hakim (LLM-as-a-Judge) yang bertugas mengevaluasi jawaban dari asisten AI lain.\n"
+        "Tugas Anda:\n"
+        "1. Periksa apakah jawaban tersebut akurat berdasarkan konteks yang diberikan.\n"
+        "2. Perbaiki, perjelas, atau tambahkan detail penting jika ada yang terlewat.\n"
+        "3. Jika jawaban sudah bagus, poles bahasanya agar lebih profesional dan rapi.\n"
+        "4. KEMBALIKAN HANYA JAWABAN YANG SUDAH DIPERBAIKI. Jangan sertakan pengantar seperti 'Berikut adalah perbaikannya'."
+    )
+    
+    user_content = (
+        f"Pertanyaan Asli: {state['question']}\n\n"
+        f"Konteks Dokumen & Graph: {state.get('standard_context', '')}\n{state.get('graph_context', '')}\n\n"
+        f"Jawaban Awal AI: {state['final_answer']}\n\n"
+        "Silakan evaluasi dan berikan jawaban versi final yang terbaik."
+    )
+    
+    messages = [
+        {"role": "system", "content": judge_prompt},
+        {"role": "user", "content": user_content}
+    ]
+    
+    try:
+        judged_answer = generate_answer(messages, stream=False, model_key=GRAPH_ANALYTIC_MODEL)
+        if not isinstance(judged_answer, str):
+            judged_answer = str(judged_answer)
+    except Exception as e:
+        logger.error(f"GraphRAG evaluate error: {e}")
+        judged_answer = state["final_answer"]
+        
+    events.append({
+        "type": "thinking_step",
+        "step": "evaluating",
+        "content": "✅ **Evaluasi Selesai:** Jawaban telah divalidasi dan dioptimalkan."
+    })
+        
+    return {"events": events, "final_answer": judged_answer}
+
+builder = StateGraph(GraphRagState)
+builder.add_node("retrieve", retrieve_node)
+builder.add_node("build_graph", build_graph_node)
+builder.add_node("traverse", traverse_node)
+builder.add_node("generate", generate_node)
+builder.add_node("evaluate", evaluate_node)
+
+builder.set_entry_point("retrieve")
+builder.add_edge("retrieve", "build_graph")
+builder.add_edge("build_graph", "traverse")
+builder.add_edge("traverse", "generate")
+builder.add_edge("generate", "evaluate")
+builder.add_edge("evaluate", END)
+
+graph_app = builder.compile()
+
+# ─── MAIN ASYNC GENERATOR ────────────────────────────────────────────────────
+
+async def run_graph_rag(
+    question: str,
+    selected_files=None,
+    stream: bool = True,
+    model_key: str = None
+) -> AsyncGenerator[Dict[str, Any], None]:
+    """
+    Deep Analytic: GraphRAG pipeline dengan streaming thinking steps via LangGraph.
+    """
+    import asyncio
+    
+    initial_state = {
+        "question": question,
+        "selected_files": selected_files,
+        "stream": stream,
+        "events": [],
     }
+    
+    final_state = None
+    async for output in graph_app.astream(initial_state):
+        for node_name, state_updates in output.items():
+            if "events" in state_updates:
+                for event in state_updates["events"]:
+                    yield event
+                    await asyncio.sleep(0.05)
+            final_state = state_updates
+            
+    if final_state and "final_answer" in final_state:
+        answer_raw = final_state["final_answer"]
+        words = answer_raw.split(" ")
+        for i, w in enumerate(words):
+            yield {"type": "chunk", "content": w + (" " if i < len(words) - 1 else "")}
+            await asyncio.sleep(0.012)
+            
+        yield {
+            "type": "citation",
+            "sources": final_state.get("final_sources", []),
+            "mode": "deep_analytic",
+        }

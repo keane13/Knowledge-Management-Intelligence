@@ -1,0 +1,157 @@
+# Build & deploy RAG Pro (backend + frontend) to Cloud Run.
+# Run from the repo root:
+#   gcloud builds submit --config cloudbuild.yaml --region us-central1 .
+# Override any _VAR with --substitutions=_REGION=asia-southeast2,_MIN_INSTANCES=1
+
+substitutions:
+  _REGION: us-central1
+  _REPO: ragpro
+  _BACKEND_SERVICE: ragpro-backend
+  _FRONTEND_SERVICE: ragpro-frontend
+  _RUN_SA: ragpro-runner              # runtime service account name (without @domain)
+  _MIN_INSTANCES: '0'                 # set to 1 to avoid slow cold starts (costs more)
+  _ADMIN_USERS: ''                    # comma-separated usernames allowed to delete docs / re-index
+  _TOOLBOX_SERVICE: ragpro-toolbox
+  _TOOLBOX_IMAGE: us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox:latest  # pin a version for prod
+  # Custom domain (see CUSTOM_DOMAIN_CLOUDFLARE.md). Leave empty to use the *.run.app URLs.
+  _PUBLIC_API_URL: ''                 # e.g. https://api.yourdomain.com — baked into the frontend build
+  _EXTRA_ORIGINS: ''                  # e.g. https://app.yourdomain.com — extra CORS origins, comma-separated
+
+steps:
+  # 1. Build backend image
+  - id: build-backend
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$BUILD_ID'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:latest'
+      - '-f'
+      - 'deployments/Dockerfile'
+      - 'backend/'
+
+  # 2. Push backend image
+  - id: push-backend
+    name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend']
+
+  # 3. Deploy MCP Toolbox (NLQ / Report Builder tools) as a private Cloud Run service.
+  #    tools.yaml comes from the TOOLBOX_TOOLS secret; only the backend's SA may invoke it.
+  - id: deploy-toolbox
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        gcloud run deploy ${_TOOLBOX_SERVICE} \
+          --image=${_TOOLBOX_IMAGE} \
+          --region=${_REGION} \
+          --service-account=${_RUN_SA}@$PROJECT_ID.iam.gserviceaccount.com \
+          --no-allow-unauthenticated \
+          --set-secrets=/secrets/tools.yaml=TOOLBOX_TOOLS:latest \
+          --args=--tools-file=/secrets/tools.yaml,--address=0.0.0.0,--port=8080 \
+          --max-instances=3
+        gcloud run services add-iam-policy-binding ${_TOOLBOX_SERVICE} --region=${_REGION} \
+          --member=serviceAccount:${_RUN_SA}@$PROJECT_ID.iam.gserviceaccount.com \
+          --role=roles/run.invoker
+        gcloud run services describe ${_TOOLBOX_SERVICE} --region ${_REGION} --format "value(status.url)" > /workspace/toolbox_url.txt
+        echo "Toolbox URL: $$(cat /workspace/toolbox_url.txt)"
+
+  # 4. Deploy backend to Cloud Run
+  - id: deploy-backend
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        gcloud run deploy ${_BACKEND_SERVICE} \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$BUILD_ID \
+          --region=${_REGION} \
+          --service-account=${_RUN_SA}@$PROJECT_ID.iam.gserviceaccount.com \
+          --allow-unauthenticated \
+          --port=8080 \
+          --cpu=2 \
+          --memory=4Gi \
+          --cpu-boost \
+          --timeout=900 \
+          --concurrency=20 \
+          --min-instances=${_MIN_INSTANCES} \
+          --max-instances=5 \
+          --set-secrets=OPENAI_API_KEY=OPENAI_API_KEY:latest,WEAVIATE_URL=WEAVIATE_URL:latest,WEAVIATE_API_KEY=WEAVIATE_API_KEY:latest,GROQ_API_KEY=GROQ_API_KEY:latest,OPENROUTER_API_KEY=OPENROUTER_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,PHOENIX_API_KEY=PHOENIX_API_KEY:latest,PHOENIX_COLLECTOR_ENDPOINT=PHOENIX_COLLECTOR_ENDPOINT:latest,HUGGINGFACE_TOKEN=HUGGINGFACE_TOKEN:latest,JWT_SECRET_KEY=JWT_SECRET_KEY:latest \
+          "--update-env-vars=^##^GCP_PROJECT_ID=$PROJECT_ID##TOOLBOX_URL=$$(cat /workspace/toolbox_url.txt)##ADMIN_USERS=${_ADMIN_USERS}"
+
+  # 5. Fetch backend URL to inject into the frontend build
+  - id: backend-url
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run services describe ${_BACKEND_SERVICE} --region ${_REGION} --format "value(status.url)" > /workspace/backend_url.txt
+        echo "Backend URL: $$(cat /workspace/backend_url.txt)"
+
+  # 6. Build frontend image (NEXT_PUBLIC_API_URL is baked in at build time)
+  - id: build-frontend
+    name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        API_URL="${_PUBLIC_API_URL}"
+        if [ -z "$$API_URL" ]; then API_URL="$$(cat /workspace/backend_url.txt)"; fi
+        echo "Frontend will call API at: $$API_URL"
+        docker build \
+          -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$BUILD_ID \
+          -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:latest \
+          --build-arg NEXT_PUBLIC_API_URL="$$API_URL" \
+          frontend/
+
+  # 7. Push frontend image
+  - id: push-frontend
+    name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend']
+
+  # 8. Deploy frontend to Cloud Run
+  - id: deploy-frontend
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_FRONTEND_SERVICE}'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$BUILD_ID'
+      - '--region=${_REGION}'
+      - '--service-account=${_RUN_SA}@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--allow-unauthenticated'
+      - '--port=3000'
+      - '--cpu=1'
+      - '--memory=512Mi'
+      - '--max-instances=5'
+
+  # 9. Lock backend CORS to the frontend URL
+  - id: backend-cors
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        FRONTEND_URL=$$(gcloud run services describe ${_FRONTEND_SERVICE} --region ${_REGION} --format "value(status.url)")
+        ORIGINS="$$FRONTEND_URL"
+        if [ -n "${_EXTRA_ORIGINS}" ]; then ORIGINS="$$ORIGINS,${_EXTRA_ORIGINS}"; fi
+        echo "Allowed CORS origins: $$ORIGINS"
+        # ^@^ switches gcloud's list delimiter so the commas stay inside the value
+        gcloud run services update ${_BACKEND_SERVICE} --region ${_REGION} \
+          "--update-env-vars=^@^ALLOWED_ORIGINS=$$ORIGINS"
+
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/backend:$BUILD_ID'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/frontend:$BUILD_ID'
+
+options:
+  machineType: E2_HIGHCPU_8          # torch + docling install is slow on the default machine
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 3600s

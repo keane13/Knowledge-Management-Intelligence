@@ -1,8 +1,7 @@
 import re
 import datetime
 from pathlib import Path
-from langchain_core.documents import Document
-from langchain_community.document_loaders import TextLoader
+from llama_index.core import Document as LlamaDocument
 import pymupdf  # PyMuPDF
 
 # Docling Imports
@@ -277,7 +276,7 @@ EXCEL_EXTENSIONS = {".xlsx", ".xls", ".csv"}
 def load_single_document(file_path: str, min_text_length: int = 300):
     """
     Load and extract text from a single file.
-    Returns a LangChain Document.
+    Returns a LlamaIndex Document.
     """
     file = Path(file_path)
     suffix = file.suffix.lower()
@@ -300,13 +299,14 @@ def load_single_document(file_path: str, min_text_length: int = 300):
         
         # 3. Evaluasi terakhir: Apakah masih butuh OCR (Docling)? Docling pilihan terakhir.
         if len(final_text) < min_text_length or is_gibberish(final_text):
-            if is_gibberish(final_text) and len(final_text) > 0:
-                print(f"   ⚠️ Terdeteksi teks Gibberish/Corrupt ({len(final_text)} chars). Memaksa Docling OCR (Pilihan Terakhir)...")
+            if is_gibberish(final_text):
+                print(f"   ⚠️ Terdeteksi teks Gibberish/Corrupt ({len(final_text)} chars). Memaksa Docling OCR dinonaktifkan sementara karena memori tidak cukup (OOM).")
             else:
                 print(f"   ⚠️ Teks terlalu sedikit ({len(final_text)} chars). Terdeteksi PDF Scan. Pindah ke Docling OCR (Pilihan Terakhir)...")
                 
-            # Fallback ke Docling OCR
-            ocr_text = extract_with_docling(str(file))
+            # Fallback ke Docling OCR (DISABLED TO PREVENT OOM)
+            # ocr_text = extract_with_docling(str(file))
+            ocr_text = ""
             
             # Gunakan hasil Docling asalkan dia mengembalikan sesuatu yang cukup
             if len(ocr_text.strip()) > 50:
@@ -320,15 +320,16 @@ def load_single_document(file_path: str, min_text_length: int = 300):
         print(f"   ✅ Done ({loader_used}). Length: {len(final_text)} chars.")
         
         metadata = {"source": file.name, "file_type": "pdf", "loader": loader_used}
-        return Document(page_content=final_text, metadata=metadata)
+        return LlamaDocument(text=final_text, metadata=metadata)
 
     # -------- TXT --------
     elif suffix == ".txt":
         try:
-            docs = TextLoader(str(file)).load()
-            if docs:
-                docs[0].metadata.update({"file_type": "txt"})
-                return docs[0]
+            with open(file, 'r', encoding='utf-8') as f:
+                text = f.read()
+            if text.strip():
+                metadata = {"source": file.name, "file_type": "txt", "loader": "builtin"}
+                return LlamaDocument(text=text.strip(), metadata=metadata)
         except Exception as e:
             print(f"❌ Failed to load TXT {file.name}: {e}")
         return None
@@ -344,7 +345,7 @@ def load_single_document(file_path: str, min_text_length: int = 300):
         print(f"   ✅ Done (python-docx). Length: {len(text)} chars.")
         
         metadata = {"source": file.name, "file_type": "docx", "loader": "python-docx"}
-        return Document(page_content=text, metadata=metadata)
+        return LlamaDocument(text=text, metadata=metadata)
 
     # -------- IMAGE --------
     elif suffix in IMAGE_EXTENSIONS:
@@ -357,7 +358,7 @@ def load_single_document(file_path: str, min_text_length: int = 300):
         print(f"   ✅ Done (OCR). Length: {len(text)} chars.")
         
         metadata = {"source": file.name, "file_type": "image", "loader": "ocr"}
-        return Document(page_content=text, metadata=metadata)
+        return LlamaDocument(text=text, metadata=metadata)
         
     # -------- AUDIO --------
     elif suffix in AUDIO_EXTENSIONS:
@@ -367,7 +368,7 @@ def load_single_document(file_path: str, min_text_length: int = 300):
             print(f"   ❌ No text transcribed from audio: {file.name}")
             return None
         metadata = {"source": file.name, "file_type": "audio", "loader": "whisper"}
-        return Document(page_content=text, metadata=metadata)
+        return LlamaDocument(text=text, metadata=metadata)
         
     # -------- PPT --------
     elif suffix in PPT_EXTENSIONS:
@@ -377,7 +378,7 @@ def load_single_document(file_path: str, min_text_length: int = 300):
             print(f"   ❌ No text extracted from PPT: {file.name}")
             return None
         metadata = {"source": file.name, "file_type": "ppt", "loader": "python-pptx"}
-        return Document(page_content=text, metadata=metadata)
+        return LlamaDocument(text=text, metadata=metadata)
         
     # -------- EXCEL --------
     elif suffix in EXCEL_EXTENSIONS:
@@ -396,7 +397,7 @@ def load_single_document(file_path: str, min_text_length: int = 300):
             print(f"   ❌ No text extracted from Spreadsheet: {file.name}")
             return None
         metadata = {"source": file.name, "file_type": "excel", "loader": "pandas"}
-        return Document(page_content=text, metadata=metadata)
+        return LlamaDocument(text=text, metadata=metadata)
 
     else:
         print(f"⏭️ Skipping unsupported file type: {file.name}")
