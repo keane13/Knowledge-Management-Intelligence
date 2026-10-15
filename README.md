@@ -286,7 +286,7 @@ User Query
 ### Build & Push to Artifact Registry
 ```bash
 # Set your project and region
-export PROJECT_ID=smooth-reason-491707-f6
+export PROJECT_ID=""
 export REGION=asia-southeast1
 export IMAGE=asia-southeast1-docker.pkg.dev/$PROJECT_ID/knowlytics/backend:latest
 
@@ -361,27 +361,6 @@ HUGGINGFACE_TOKEN=your_hf_token
 
 ---
 
-## 🗺️ Roadmap
-
-### Short-Term (Q3 2026)
-- [ ] **Firestore Full Integration**: Replace all remaining PostgreSQL calls (chat session CRUD) with Firestore client
-- [ ] **Knowledge Base UI**: Build a dedicated document management panel allowing upload, deletion, and category assignment synced to Firestore's `knowledge_base` collection
-- [ ] **Data Analysis History**: Persist analysis results and report outputs to Firestore's `data_analysis_history` and `report_builder_history` collections
-- [ ] **Auth Hardening**: Move from static JWT secret to Google Cloud Secret Manager; add refresh token rotation
-
-### Mid-Term (Q4 2026)
-- [ ] **Multi-tenancy**: Isolate collections and vector namespaces per organization/tenant
-- [ ] **Hybrid Search**: Add BM25 keyword search alongside vector search in Weaviate for improved recall on exact-match queries
-- [ ] **Streaming BigQuery**: Stream large BigQuery result sets progressively rather than loading full DataFrames into memory
-- [ ] **Evaluation Dashboard**: Surface RAGAS metrics and Phoenix traces directly within the application UI
-
-### Long-Term (2027)
-- [ ] **Agent Memory**: Persistent long-term memory for reasoning agents using Firestore as a memory store
-- [ ] **Scheduled Reports**: Cron-triggered Report Builder runs with delivery via email or Slack
-- [ ] **Role-Based Access Control (RBAC)**: Fine-grained permissions at the document collection and BigQuery dataset level
-- [ ] **Fine-tuning Pipeline**: Domain-specific model fine-tuning on enterprise document corpus using indexed knowledge base data
-
----
 
 ## 📂 Project Structure
 
