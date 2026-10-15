@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧠 Knowlytics Intelligence
+# 🧠 Knowledge Management Intelligence
 
 ### Enterprise-Grade Multi-Agent RAG Platform
 
@@ -18,7 +18,7 @@
 
 ## 📌 Overview
 
-**Knowlytics Intelligence** is a full-stack, enterprise AI platform built to solve the critical challenge of *unlocking knowledge trapped in documents and databases*. It goes beyond a simple chatbot — it is an intelligent, multi-modal knowledge engine capable of:
+**Knowledge Management Intelligence** is a full-stack, enterprise AI platform built to solve the critical challenge of *unlocking knowledge trapped in documents and databases*. It goes beyond a simple chatbot — it is an intelligent, multi-modal knowledge engine capable of:
 
 - Answering questions grounded on private enterprise documents with cited sources
 - Querying structured relational databases using plain natural language (NLQ)
